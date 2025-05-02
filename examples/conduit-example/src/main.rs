@@ -17,6 +17,5 @@ fn main() {
     "#;
 
     let mut engine = Engine::new();
-
     engine.run_pipeline(pipeline);
 }

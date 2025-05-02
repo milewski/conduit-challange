@@ -8,13 +8,10 @@ name = "conduit"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-tokio = { workspace = true }
 uuid = { workspace = true }
 pest = { workspace = true }
 pest_derive = { workspace = true }
 thiserror = { workspace = true }
 inventory = { workspace = true }
 bevy_ecs = { workspace = true }
-conduit-derive = { path = "../conduit-derive" }
-image = "0.25.6"
 heck = "0.5.0"
