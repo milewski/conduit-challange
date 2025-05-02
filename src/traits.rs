@@ -1,9 +1,5 @@
-use std::any::Any;
-use std::collections::HashMap;
+use crate::node::SharedValue;
 use std::fmt::Debug;
-use std::sync::Arc;
-use crate::node::{Output, SharedValue};
-use crate::registry::Payload;
 
 pub trait Node: Debug + Descriptor {
     fn run(&self);

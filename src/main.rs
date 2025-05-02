@@ -10,14 +10,14 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Arc;
+use dsl::parser::{Direction, Identifier, NodeParser, Value};
 
 mod nodes;
-mod parser;
 mod registry;
 mod traits;
 mod node;
+mod dsl;
 
-use crate::parser::{Direction, Identifier, Parser, Value};
 use crate::registry::NodeRegistry;
 use crate::traits::Node;
 
@@ -107,7 +107,7 @@ enum MaybeResolved {
 
 #[tokio::main()]
 async fn main() {
-    let parser = Parser::new(
+    let parser = NodeParser::new(
         r#"
             file loader { input <- "./me.jpg" }
             resizer {
