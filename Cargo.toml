@@ -19,3 +19,10 @@ thiserror = "2.0.12"
 inventory = "0.3.20"
 #specs = "0.20.0"
 bevy_ecs = "0.16.0"
+conduit-derive = { path = "./conduit-derive" }
+
+[workspace]
+members = [
+    ".",
+    "conduit-derive"
+]

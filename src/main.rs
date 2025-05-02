@@ -19,7 +19,6 @@ mod node;
 mod dsl;
 
 use crate::registry::NodeRegistry;
-use crate::traits::Node;
 
 #[derive(Component, Debug)]
 struct Module {

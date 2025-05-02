@@ -1,7 +1,7 @@
 use crate::node::SharedValue;
 use std::fmt::Debug;
 
-pub trait Node: Debug + Descriptor {
+pub trait ExecutableNode: Debug + Descriptor {
     fn run(&self);
 }
 
