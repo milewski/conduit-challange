@@ -1,0 +1,21 @@
+[package]
+name = "conduit"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1.44.1", features = ["full"] }
+uuid = { version = "1.14.0", features = ["v4"] }
+serde = { version = "1.0.218", features = ["derive"] }
+async-trait = "0.1.87"
+log = "0.4.26"
+pest = { version = "2.7.15", features = ["pretty-print"] }
+pest_derive = { version = "2.7.15" }
+image = "0.25.5"
+num-traits = "0.2.19"
+tokio-stream = { version = "0.1.17", features = ["full"] }
+petgraph = "0.7.1"
+thiserror = "2.0.12"
+inventory = "0.3.20"
+#specs = "0.20.0"
+bevy_ecs = "0.16.0"

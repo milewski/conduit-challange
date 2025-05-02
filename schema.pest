@@ -1,0 +1,33 @@
+nodes = { SOI ~ (anonymous_node | node)* ~ EOI }
+node = { identifier ~  module ~ body }
+anonymous_node = { module ~ body }
+
+body = { "{" ~ parameter* ~ "}" }
+parameter = { property ~ direction ~ value }
+
+string = { "\"" ~ inner_string ~ "\"" }
+inner_string = @{ char* }
+char = _{
+    !("\"" | "\\") ~ ANY
+    | "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t")
+    | "\\" ~ ("u" ~ ASCII_HEX_DIGIT{4})
+}
+
+number = @{
+    "-"?
+    ~ ("0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
+    ~ ("." ~ ASCII_DIGIT*)?
+    ~ (^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
+}
+
+boolean = { "true" | "false" }
+relation = { identifier ~ "::" ~ property }
+
+value = { number | string | boolean | relation | node | anonymous_node | identifier }
+
+direction = { "<-" | "->" }
+identifier = @{ ASCII_ALPHA+ }
+module = @{ ASCII_ALPHA+ }
+property = @{ (ASCII_ALPHA | "_")+ }
+
+WHITESPACE = _{ " " | NEWLINE }
