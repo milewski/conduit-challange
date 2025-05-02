@@ -3,7 +3,6 @@
 Conduit is a domain-specific language (DSL) for creating node-based workflows in Rust. It enables you to build complex data processing pipelines with a simple, declarative syntax.
 
 ## Table of Contents
-- [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Basic Syntax](#basic-syntax)
 - [Node Components](#node-components)
@@ -21,7 +20,8 @@ Add Conduit to your Cargo.toml:
 
 ```toml
 [dependencies]
-conduit-dsl = "0.1.0"
+conduit = { git = "https://github.com/milewski/conduit-challange.git", version = "0.1.0" }
+conduit-derive = { git = "https://github.com/milewski/conduit-challange.git", version = "0.1.0" }
 ```
 
 ## Quick Start
@@ -29,15 +29,21 @@ conduit-dsl = "0.1.0"
 ```rust
 use conduit::Engine;
 
+#[derive(Node)]
+pub struct HelloWorld {
+    pub hello: Input<String>,
+}
+
+impl ExecutableNode for HelloWorld {
+    fn run(&self) {
+        println!("hello: {}", self.hello.read());
+    }
+}
+
 fn main() {
     let workflow = r#"
-        reader read_file {
-            input <- "./data.csv"
-            output -> process {
-                output -> write_file {
-                    destination <- "processed.csv"
-                }
-            }
+        hello_world {
+            hello <- "world"
         }
     "#;
 
