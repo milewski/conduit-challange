@@ -1,9 +1,6 @@
 #![allow(warnings)]
 
 use crate::node::SharedValue;
-use crate::nodes::loader::Loader;
-use crate::nodes::resizer::Resizer;
-use crate::nodes::save::Save;
 use bevy_ecs::observer::TriggerTargets;
 use bevy_ecs::prelude::*;
 use std::any::Any;
@@ -124,9 +121,8 @@ async fn main() {
     let mut schedule = Schedule::default();
     let mut registry = NodeRegistry::new();
 
-    registry.register::<Loader>("loader");
-    registry.register::<Resizer>("resizer");
-    registry.register::<Save>("save");
+    // Register all nodes automatically using the inventory pattern
+    registry.register_all();
 
     world.insert_resource(registry);
     schedule.add_systems(setup);

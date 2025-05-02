@@ -9,6 +9,7 @@ pub trait Descriptor {
     fn name(&self) -> &'static str;
     fn fields(&self) -> Vec<FieldType>;
     fn take_outputs(self: Box<Self>) -> Vec<(&'static str, SharedValue)>;
+    fn is_continuous(&self) -> bool { false }
 }
 
 #[derive(Clone, Debug)]

@@ -2,8 +2,8 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, FieldsNamed, Ident};
 
-/// Derive macro for automatically implementing the Descriptor trait and From<Payload> trait
-/// This allows nodes to be created with minimal boilerplate
+/// Derive macro for automatically implementing the Descriptor trait, From<Payload> trait,
+/// and registering the node with the NodeRegistry
 #[proc_macro_derive(Node)]
 pub fn derive_node(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
@@ -24,12 +24,37 @@ pub fn derive_node(input: TokenStream) -> TokenStream {
     // Generate implementations
     let descriptor_impl = generate_descriptor_impl(name, fields);
     let from_payload_impl = generate_from_payload_impl(name, fields);
+    
+    // Generate registration code
+    let name_str = name.to_string();
+    let registration_impl = quote! {
+        // Implement the RegisterableNode trait for this node type
+        impl crate::registry::RegisterableNode for #name {
+            fn register_type(registry: &mut crate::registry::NodeRegistry) {
+                // Convert struct name to lowercase for registration
+                let node_name = stringify!(#name).to_lowercase();
+                // Use as_str() to convert String to &str
+                registry.register::<#name>(node_name.as_str());
+            }
+            
+            fn type_name() -> &'static str {
+                #name_str
+            }
+        }
+        
+        // Add this node to the inventory
+        inventory::submit! {
+            crate::registry::NodeRegistration::new::<#name>()
+        }
+    };
 
     // Combine the implementations
     let expanded = quote! {
         #descriptor_impl
         
         #from_payload_impl
+        
+        #registration_impl
     };
 
     TokenStream::from(expanded)
