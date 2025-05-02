@@ -1,6 +1,10 @@
-### Documentation
+# Conduit - Node-Based Workflow DSL
 
-This is an simple example:
+Conduit is a domain-specific language (DSL) for creating node-based workflows in Rust. This document explains the syntax and concepts of the language.
+
+## Basic Syntax
+
+A node in Conduit is defined using the following syntax:
 
 ```
 node_name module_name {
@@ -9,14 +13,33 @@ node_name module_name {
 }
 ```
 
-a note is composed of 3 components: 
+### Node Components
 
-`node_name`: this is an arbritrary number, it can be anything, it is used to organize and reference your node from 
-another node however it is optional, a node without a name is called anonymous node and it cannot be referrence from other nodes
+Each node consists of three main components:
 
-`module_name`: this is the modules that will execute the core logic of your workflow, modules are simple rust files that 
-receive inputs and write to outputs, this is an simple example of a module that read a file and output the content of it 
-for the next node chained to it to consume
+1. **Node Name** (optional): An identifier used to reference the node from other nodes. If omitted, the node is considered "anonymous" and cannot be referenced elsewhere.
+
+2. **Module Name**: Specifies the Rust module that implements the node's functionality. Modules are Rust files that define how inputs are processed and outputs are generated.
+
+3. **Attributes**: Define the inputs and outputs of the node using arrow notation.
+
+## Arrow Notation
+
+The direction of arrows indicates data flow:
+
+- `<-` (left arrow): Assigns a value to an input attribute
+- `->` (right arrow): Directs output to another node
+
+Values can be:
+- Numbers: `123`
+- Strings: `"abc"`
+- Booleans: `true`, `false`
+- References to other nodes: `node_name` or `node_name::output_port`
+- Inline node definitions (nested nodes)
+
+## Module Implementation
+
+Modules are implemented as Rust structs. Here's an example of a file reading module:
 
 ```rust
 #[derive(Node)]
@@ -34,16 +57,11 @@ impl ExecutableNode for ReadFile {
 }
 ```
 
-`attribute_1 <- 123`: this is how attributes, the direction of the arrow matters `<-` 
-means the element on the right will be filled in to the attribute on the left as an INPUT
-you are also able to do the, the values on the right can be `number` `string` `bool` a reference to another node `node_name::output_port` or an inline definition of another node more on this later
+## Anonymous Nodes
 
+Nodes without names are called anonymous nodes and can be defined in two ways:
 
-# anonymos nodes
-
-nodes without a name are anonymous and they can be defined in 2 forms,
-
-at the root level:
+### At the Root Level
 
 ```
 module_a {
@@ -55,7 +73,7 @@ module_b {
 }
 ```
 
-or inlined inside other node
+### Inline Within Another Node
 
 ```
 module_a {
@@ -65,8 +83,7 @@ module_a {
 }
 ```
 
-when defining it inline the the convention is that an OUTPUT field on the node called `output` will be used,
-if your module has multiple outputs or uses a different name that can be specified using this syntax:
+When defining inline nodes, by default the `output` field is used. For other output fields:
 
 ```
 module_a {
@@ -76,7 +93,11 @@ module_a {
 }
 ```
 
-you can also share input/outputs among multiple nodes, you just have to give a name to your node and link it as following:
+## Node Sharing and Chaining
+
+### Sharing Node Outputs
+
+You can share a node's output among multiple nodes:
 
 ```
 file file_reader { input <- "./my-file.txt" }
@@ -90,25 +111,35 @@ module_b {
 }
 ```
 
-(note that the ::output is optional if the output field is called output) 
-This way the file will  be efficienly shared among the two nodes, depending on the dependency graph the two nodes may 
-even be qualified to be executed in parallel 
+Note: The `::output` suffix is optional when the output field is named "output".
 
-you can also chain node the inverse like this:
+This approach enables efficient resource sharing and potential parallel execution based on the dependency graph.
+
+### Forward Chaining
+
+You can also chain nodes using forward notation:
 
 ```
 file file_reader { 
     input <- "./my-file.txt"
     output -> module_b {
         output -> write_file {
-            destination <-- "output.text"
+            destination <- "output.text"
         } 
     }
 }
 ```
 
-Note how the arrows points to the where the data needs to flow, and the same rule as of ::output applies here too
-for instance `output -> module_b` is the same as `output -> module_b::input`
+In this syntax:
+- `output -> module_b` is equivalent to `output -> module_b::input`
+- Arrows point in the direction of data flow
 
-and this is an introduction of how the syntax for this DSL works, the power really comes when you start
-creating your own nodes and chaining multiple resusable pieces together.
+## Getting Started
+
+To create your own workflows:
+
+1. Define your custom modules in Rust
+2. Chain them together using the Conduit DSL
+3. Leverage existing modules for common operations
+
+The true power of Conduit emerges when you create reusable nodes and chain them together to build complex workflows.
