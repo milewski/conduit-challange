@@ -28,6 +28,7 @@ conduit-derive = { git = "https://github.com/milewski/conduit-challange.git", ve
 
 ```rust
 use conduit::Engine;
+use conduit_derive::Node;
 
 #[derive(Node)]
 pub struct HelloWorld {
