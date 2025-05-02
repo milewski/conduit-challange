@@ -1,0 +1,12 @@
+{
+  "name": "conduit-node",
+  "version": "1.0.0",
+  "description": "Node.js bindings for Conduit DSL",
+  "scripts": {
+    "test": "npx esno ./src/Main.ts"
+  },
+  "dependencies": {
+    "ffi-rs": "^1.2.10",
+    "@types/node": "^22.15.3"
+  }
+}

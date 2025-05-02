@@ -7,8 +7,12 @@ edition = "2024"
 name = "basic"
 path = "src/main.rs"
 
+[lib]
+name = "conduit_example_lib"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 image = "0.25.6"
-conduit = { path = "../../packages/conduit" }
-conduit-derive = { path = "../../packages/conduit-derive" }
+conduit = { workspace = true }
+conduit-derive = { workspace = true }
 inventory = { workspace = true }

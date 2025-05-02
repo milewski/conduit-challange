@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "examples/*",
+    "examples/conduit-example",
     "packages/*",
 ]
 
@@ -9,7 +9,8 @@ members = [
 uuid = { version = "1.14.0", features = ["v4"] }
 pest = { version = "2.7.15", features = ["pretty-print"] }
 pest_derive = { version = "2.7.15" }
-image = "0.25.5"
 thiserror = "2.0.12"
 inventory = "0.3.20"
 bevy_ecs = "0.16.0"
+conduit = { path = "./packages/conduit" }
+conduit-derive = { path = "./packages/conduit-derive" }
