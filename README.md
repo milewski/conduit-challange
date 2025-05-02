@@ -37,7 +37,7 @@ pub struct HelloWorld {
 
 impl ExecutableNode for HelloWorld {
     fn run(&self) {
-        println!("hello: {}", self.hello.read());
+        println!("hello {}", self.hello.read());
     }
 }
 
@@ -50,6 +50,8 @@ fn main() {
 
     let mut engine = Engine::new();
     engine.run_pipeline(workflow);
+    
+    // you should see hello world printed to the console
 }
 ```
 
