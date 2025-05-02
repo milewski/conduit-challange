@@ -20,7 +20,7 @@ impl ExecutableNode for Resizer {
         let mut buffer = Vec::new();
         let mut cursor = Cursor::new(&mut buffer);
 
-        image.write_to(&mut cursor, image::ImageFormat::Jpeg).unwrap();
+        image.write_to(&mut cursor, image::ImageFormat::Png).unwrap();
 
         self.output.write(buffer)
     }

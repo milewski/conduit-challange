@@ -3,11 +3,11 @@
 use crate::node::SharedValue;
 use bevy_ecs::observer::TriggerTargets;
 use bevy_ecs::prelude::*;
+use dsl::parser::{Direction, Identifier, NodeParser, Value};
 use std::any::Any;
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::Arc;
-use dsl::parser::{Direction, Identifier, NodeParser, Value};
 
 mod nodes;
 mod registry;
@@ -86,6 +86,18 @@ impl InputsMap {
             self.replace_outputs(related_identifier, &related_property, value.clone());
         }
     }
+
+    pub fn has_unresolved_nodes(&self) -> bool {
+        // Check if there are any nodes with unresolved inputs that could potentially be resolved
+        for (_, fields) in self.0.iter() {
+            for (_, field) in fields.iter() {
+                if let MaybeResolved::Unresolved { .. } = field {
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 #[derive(Debug)]
@@ -105,12 +117,11 @@ enum MaybeResolved {
 async fn main() {
     let parser = NodeParser::new(
         r#"
-            file loader { input <- "./me.jpg" }
             resizer {
-                source <- file::output
-                width <- 512
-                height <- 256
-                output -> save { destination <- "example-2.jpg" }
+                source <- loader { input <- "./me.jpg" }
+                width <- 128
+                height <- 128
+                output -> save { destination <- "me.optimized.jpg" }
             }
         "#,
     );
@@ -147,8 +158,48 @@ async fn main() {
     }
 
     world.insert_resource(inputs);
-    schedule.run(&mut world);
-    schedule.run(&mut world);
+
+    // Run the schedule until all nodes are processed
+    run_until_complete(&mut world, &mut schedule);
+}
+
+// Function to run the schedule until all nodes are processed
+fn run_until_complete(world: &mut World, schedule: &mut Schedule) {
+    let mut iterations = 0;
+    let max_iterations = 100; // Safety limit to prevent infinite loops
+
+    loop {
+        // Store the count of unprocessed nodes before running the schedule
+        let unprocessed_count_before = world.query_filtered::<Entity, (With<Module>, Without<Done>)>().iter(world).count();
+
+        if unprocessed_count_before == 0 {
+            // All nodes are processed
+            break;
+        }
+
+        // Run one tick of the schedule
+        schedule.run(world);
+
+        // Check if any progress was made in this iteration
+        let unprocessed_count_after = world.query_filtered::<Entity, (With<Module>, Without<Done>)>().iter(world).count();
+
+        iterations += 1;
+
+        // If no progress was made and we still have unprocessed nodes, we might have a deadlock
+        if unprocessed_count_before == unprocessed_count_after && iterations > 1 {
+            // Check if there are any unresolved inputs that could potentially be resolved
+            let inputs = world.get_resource::<InputsMap>().unwrap();
+            if !inputs.has_unresolved_nodes() {
+                println!("Warning: No progress made and no more resolvable inputs. Possible deadlock detected.");
+                break;
+            }
+        }
+
+        if iterations >= max_iterations {
+            println!("Warning: Reached maximum iterations limit ({}). There might be a circular dependency.", max_iterations);
+            break;
+        }
+    }
 }
 
 pub fn setup(
