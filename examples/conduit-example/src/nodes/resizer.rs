@@ -1,10 +1,10 @@
-use crate::node::{Input, Output};
-use crate::traits::ExecutableNode;
+use conduit::node::{Input, Output};
+use conduit::traits::ExecutableNode;
 use conduit_derive::Node;
 use image::imageops;
 use std::io::Cursor;
 
-#[derive(Node, Debug)]
+#[derive(Node)]
 pub struct Resizer {
     pub source: Input<Vec<u8>>,
     pub width: Input<u32>,
@@ -14,7 +14,6 @@ pub struct Resizer {
 
 impl ExecutableNode for Resizer {
     fn run(&self) {
-        println!("resize");
         let image = image::load_from_memory(self.source.read().as_slice()).unwrap();
         let image = image.resize(*self.width.read(), *self.height.read(), imageops::FilterType::Lanczos3);
         let mut buffer = Vec::new();

@@ -1,9 +1,20 @@
-[package]
-name = "conduit"
-version = "0.1.0"
-edition = "2024"
+#[package]
+#name = "conduit"
+#version = "0.1.0"
+#edition = "2024"
 
-[dependencies]
+#[lib]
+#name = "conduit"
+#crate-type = ["cdylib", "rlib"]
+
+[workspace]
+resolver = "2"
+members = [
+    "examples/*",
+    "packages/*",
+]
+
+[workspace.dependencies]
 tokio = { version = "1.44.1", features = ["full"] }
 uuid = { version = "1.14.0", features = ["v4"] }
 serde = { version = "1.0.218", features = ["derive"] }
@@ -20,9 +31,3 @@ inventory = "0.3.20"
 #specs = "0.20.0"
 bevy_ecs = "0.16.0"
 conduit-derive = { path = "./conduit-derive" }
-
-[workspace]
-members = [
-    ".",
-    "conduit-derive"
-]

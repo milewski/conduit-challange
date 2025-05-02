@@ -29,10 +29,11 @@ pub fn derive_node(input: TokenStream) -> TokenStream {
     let name_str = name.to_string();
     let registration_impl = quote! {
         // Implement the RegisterableNode trait for this node type
-        impl crate::registry::RegisterableNode for #name {
-            fn register_type(registry: &mut crate::registry::NodeRegistry) {
+        impl conduit::registry::RegisterableNode for #name {
+            fn register_type(registry: &mut conduit::registry::NodeRegistry) {
                 // Convert struct name to lowercase for registration
-                let node_name = stringify!(#name).to_lowercase();
+                let node_name = stringify!(#name).to_string();
+
                 // Use as_str() to convert String to &str
                 registry.register::<#name>(node_name.as_str());
             }
@@ -44,7 +45,7 @@ pub fn derive_node(input: TokenStream) -> TokenStream {
         
         // Add this node to the inventory
         inventory::submit! {
-            crate::registry::NodeRegistration::new::<#name>()
+            conduit::registry::NodeRegistration::new::<#name>()
         }
     };
 
@@ -70,9 +71,9 @@ fn generate_descriptor_impl(name: &Ident, fields: &FieldsNamed) -> proc_macro2::
         let type_str = quote!(#ty).to_string();
 
         if type_str.contains("Input") {
-            quote! { crate::traits::FieldType::Input(#field_name_str) }
+            quote! { conduit::traits::FieldType::Input(#field_name_str) }
         } else if type_str.contains("Output") {
-            quote! { crate::traits::FieldType::Output(#field_name_str) }
+            quote! { conduit::traits::FieldType::Output(#field_name_str) }
         } else {
             panic!("Field {} must be either Input<T> or Output<T>", field_name_str);
         }
@@ -97,18 +98,18 @@ fn generate_descriptor_impl(name: &Ident, fields: &FieldsNamed) -> proc_macro2::
     let struct_name_lowercase = name.to_string().to_lowercase();
 
     quote! {
-        impl crate::traits::Descriptor for #name {
+        impl conduit::traits::Descriptor for #name {
             fn name(&self) -> &'static str {
                 #struct_name_lowercase
             }
             
-            fn fields(&self) -> Vec<crate::traits::FieldType> {
+            fn fields(&self) -> Vec<conduit::traits::FieldType> {
                 vec![
                     #(#field_types),*
                 ]
             }
             
-            fn take_outputs(self: Box<Self>) -> Vec<(&'static str, crate::node::SharedValue)> {
+            fn take_outputs(self: Box<Self>) -> Vec<(&'static str, conduit::node::SharedValue)> {
                 vec![
                     #(#output_fields),*
                 ]
@@ -126,7 +127,7 @@ fn generate_from_payload_impl(name: &Ident, fields: &FieldsNamed) -> proc_macro2
 
         if type_str.contains("Input") {
             quote! {
-                #field_name: crate::node::Input::new(value.get(#field_name_str).unwrap().to_owned())
+                #field_name: conduit::node::Input::new(value.get(#field_name_str).unwrap().to_owned())
             }
         } else if type_str.contains("Output") {
             quote! {
@@ -138,8 +139,8 @@ fn generate_from_payload_impl(name: &Ident, fields: &FieldsNamed) -> proc_macro2
     });
 
     quote! {
-        impl From<crate::registry::Payload> for #name {
-            fn from(value: crate::registry::Payload) -> Self {
+        impl From<conduit::registry::Payload> for #name {
+            fn from(value: conduit::registry::Payload) -> Self {
                 Self {
                     #(#field_initializers),*
                 }

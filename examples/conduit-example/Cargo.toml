@@ -1,0 +1,14 @@
+[package]
+name = "conduit-example"
+version = "0.1.0"
+edition = "2024"
+
+[[example]]
+name = "basic"
+path = "src/main.rs"
+
+[dependencies]
+image = "0.25.6"
+conduit = { path = "../../packages/conduit" }
+conduit-derive = { path = "../../packages/conduit-derive" }
+inventory = { workspace = true }

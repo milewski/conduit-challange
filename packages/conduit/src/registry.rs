@@ -2,6 +2,7 @@ use crate::node::SharedValue;
 use crate::traits::ExecutableNode;
 use bevy_ecs::prelude::Resource;
 use std::collections::HashMap;
+use heck::ToSnakeCase;
 
 #[derive(Resource)]
 pub struct NodeRegistry {
@@ -45,7 +46,7 @@ impl NodeRegistry {
     }
 
     pub fn register<F: ExecutableNode + for<'a> From<Payload> + 'static>(&mut self, name: &str) {
-        self.factories.insert(name.to_string(), |inputs| Box::<F>::new(inputs.into()));
+        self.factories.insert(name.to_snake_case(), |inputs| Box::<F>::new(inputs.into()));
     }
 
     pub fn create(&self, name: &str, settings: Payload) -> Option<Box<dyn ExecutableNode>> {

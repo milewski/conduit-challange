@@ -26,8 +26,8 @@ relation = { identifier ~ "::" ~ property }
 value = { number | string | boolean | relation | node | anonymous_node | identifier }
 
 direction = { "<-" | "->" }
-identifier = @{ ASCII_ALPHA+ }
-module = @{ ASCII_ALPHA+ }
+identifier = @{ (ASCII_ALPHA | "_")+ }
+module = @{ (ASCII_ALPHA | "_")+ }
 property = @{ (ASCII_ALPHA | "_")+ }
 
 WHITESPACE = _{ " " | NEWLINE }

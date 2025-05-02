@@ -1,6 +1,6 @@
 # Conduit - Node-Based Workflow DSL
 
-Conduit is a domain-specific language (DSL) for creating node-based workflows in Rust. This document explains the syntax and concepts of the language.
+Conduit is a domain-specific language (DSL) for creating node-based workflows in Rust. This document explains the syntax and concepts of the language, as well as how to use it from Node.js via FFI.
 
 ## Basic Syntax
 
@@ -134,12 +134,77 @@ In this syntax:
 - `output -> module_b` is equivalent to `output -> module_b::input`
 - Arrows point in the direction of data flow
 
+## Using Conduit from Node.js
+
+Conduit can be used from Node.js applications via FFI (Foreign Function Interface). This allows you to define and execute workflows from JavaScript.
+
+### Prerequisites
+
+- Node.js (v14 or later recommended)
+- npm or yarn
+- Rust (stable channel)
+
+### Building the Library
+
+1. Build the Rust library:
+   ```bash
+   cargo build --release
+   ```
+
+2. Install Node.js dependencies:
+   ```bash
+   npm install
+   ```
+
+### Node.js API
+
+The Node.js binding provides a simple API to interact with Conduit:
+
+```javascript
+const { ConduitEngine } = require('./node-binding');
+
+// Create a new engine instance
+const engine = new ConduitEngine();
+
+try {
+  // Define your workflow
+  const pipeline = `
+    resizer {
+      source <- loader { input <- "./image.jpg" }
+      width <- 128
+      height <- 128
+      output -> save { destination <- "resized.jpg" }
+    }
+  `;
+
+  // Execute the workflow
+  const success = engine.runPipeline(pipeline);
+  
+  if (success) {
+    console.log('Pipeline executed successfully!');
+  } else {
+    console.error('Failed to execute pipeline');
+  }
+} finally {
+  // Always clean up resources
+  engine.destroy();
+}
+```
+
+### API Reference
+
+#### `ConduitEngine`
+
+- `constructor()`: Creates a new Conduit engine instance
+- `runPipeline(pipelineCode: string): boolean`: Executes the given pipeline code
+- `destroy()`: Frees resources associated with the engine
+
 ## Getting Started
 
 To create your own workflows:
 
 1. Define your custom modules in Rust
-2. Chain them together using the Conduit DSL
-3. Leverage existing modules for common operations
+2. Build the library with `cargo build --release`
+3. Use the Node.js API to execute your workflows
 
-The true power of Conduit emerges when you create reusable nodes and chain them together to build complex workflows.
+The true power of Conduit emerges when you create reusable nodes and chain them together to build complex workflows that can be executed from both Rust and Node.js.
