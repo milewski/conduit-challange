@@ -28,6 +28,7 @@ pub fn derive_node(input: TokenStream) -> TokenStream {
     // Combine the implementations
     let expanded = quote! {
         #descriptor_impl
+        
         #from_payload_impl
     };
 
@@ -44,9 +45,9 @@ fn generate_descriptor_impl(name: &Ident, fields: &FieldsNamed) -> proc_macro2::
         let type_str = quote!(#ty).to_string();
 
         if type_str.contains("Input") {
-            quote! { FieldType::Input(#field_name_str) }
+            quote! { crate::traits::FieldType::Input(#field_name_str) }
         } else if type_str.contains("Output") {
-            quote! { FieldType::Output(#field_name_str) }
+            quote! { crate::traits::FieldType::Output(#field_name_str) }
         } else {
             panic!("Field {} must be either Input<T> or Output<T>", field_name_str);
         }
@@ -71,18 +72,18 @@ fn generate_descriptor_impl(name: &Ident, fields: &FieldsNamed) -> proc_macro2::
     let struct_name_lowercase = name.to_string().to_lowercase();
 
     quote! {
-        impl Descriptor for #name {
+        impl crate::traits::Descriptor for #name {
             fn name(&self) -> &'static str {
                 #struct_name_lowercase
             }
             
-            fn fields(&self) -> Vec<FieldType> {
+            fn fields(&self) -> Vec<crate::traits::FieldType> {
                 vec![
                     #(#field_types),*
                 ]
             }
             
-            fn take_outputs(self: Box<Self>) -> Vec<(&'static str, SharedValue)> {
+            fn take_outputs(self: Box<Self>) -> Vec<(&'static str, crate::node::SharedValue)> {
                 vec![
                     #(#output_fields),*
                 ]
@@ -100,7 +101,7 @@ fn generate_from_payload_impl(name: &Ident, fields: &FieldsNamed) -> proc_macro2
 
         if type_str.contains("Input") {
             quote! {
-                #field_name: Input::new(value.get(#field_name_str).unwrap().to_owned())
+                #field_name: crate::node::Input::new(value.get(#field_name_str).unwrap().to_owned())
             }
         } else if type_str.contains("Output") {
             quote! {
@@ -112,8 +113,8 @@ fn generate_from_payload_impl(name: &Ident, fields: &FieldsNamed) -> proc_macro2
     });
 
     quote! {
-        impl From<Payload> for #name {
-            fn from(value: Payload) -> Self {
+        impl From<crate::registry::Payload> for #name {
+            fn from(value: crate::registry::Payload) -> Self {
                 Self {
                     #(#field_initializers),*
                 }

@@ -1,7 +1,8 @@
-use pest::iterators::Pair;
-use std::collections::BTreeMap;
 use crate::dsl::error::ParserError;
 use crate::dsl::parser::{Direction, Identifier, NodeInstruct, Rule, Value};
+use pest::iterators::Pair;
+use std::collections::BTreeMap;
+
 #[derive(Debug, Default)]
 pub struct Visitor {
     nodes: BTreeMap<Identifier, NodeInstruct>,

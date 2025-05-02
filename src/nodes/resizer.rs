@@ -1,6 +1,5 @@
-use crate::node::{Input, Output, SharedValue};
-use crate::registry::Payload;
-use crate::traits::{Descriptor, ExecutableNode, FieldType};
+use crate::node::{Input, Output};
+use crate::traits::ExecutableNode;
 use conduit_derive::Node;
 use image::imageops;
 use std::io::Cursor;
@@ -21,7 +20,7 @@ impl ExecutableNode for Resizer {
         let mut buffer = Vec::new();
         let mut cursor = Cursor::new(&mut buffer);
 
-        image.write_to(&mut cursor, image::ImageFormat::Png).unwrap();
+        image.write_to(&mut cursor, image::ImageFormat::Jpeg).unwrap();
 
         self.output.write(buffer)
     }

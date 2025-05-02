@@ -1,13 +1,14 @@
-use std::collections::BTreeMap;
-use pest_derive::Parser;
-use pest::iterators::Pair;
-use pest::Parser;
-use bevy_ecs::component::Component;
-use uuid::Uuid;
-use std::fmt::{Display, Formatter};
-use std::ops::Deref;
 use crate::dsl::error::ParserError;
 use crate::dsl::visitor::Visitor;
+use bevy_ecs::component::Component;
+use pest::iterators::Pair;
+use pest::Parser;
+use pest_derive::Parser;
+use std::collections::BTreeMap;
+use std::fmt::{Display, Formatter};
+use std::ops::Deref;
+use uuid::Uuid;
+
 #[derive(Parser, Debug)]
 #[grammar = "schema.pest"]
 pub struct NodeParser {
@@ -39,90 +40,6 @@ impl NodeParser {
         visitor.link()?;
 
         Ok(visitor.take_nodes())
-    }
-}
-
-
-#[cfg(test)]
-mod test {
-    use crate::parser::Parser;
-    use std::collections::BTreeMap;
-    use crate::dsl::error::ParserError;
-    use crate::dsl::parser::{Identifier, NodeInstruct, Value};
-
-    struct TestHelper {
-        data: BTreeMap<Identifier, NodeInstruct>,
-    }
-
-    impl TestHelper {
-        pub fn assert_matches(&self, path: &str, expected_pattern: impl Fn(&Value) -> bool) {
-            let mut parts = path.split("::");
-            let module = parts.next().unwrap();
-            let property = parts.next().unwrap();
-
-            let value = self.data.get(&Identifier(module.to_string()))
-                .and_then(|value| value.inputs.get(property))
-                .expect("Value not found");
-
-            assert!(expected_pattern(value), "Value at {} did not match expected pattern", path);
-        }
-    }
-
-    macro_rules! parser {
-        ($input:expr) => {{
-            let data = Parser::new($input)?.evaluate()?;
-            TestHelper { data }
-        }};
-    }
-
-    macro_rules! assert_value {
-        ($data:expr, $path:expr, Value::Numeric { value: $val:expr, .. }) => {
-            $data.assert_matches($path, |value| {
-                matches!(value, Value::Numeric { value, .. } if value == $val)
-            })
-        };
-        ($data:expr, $path:expr, Value::String { value: $val:expr, .. }) => {
-            $data.assert_matches($path, |value| {
-                matches!(value, Value::String { value, .. } if value == $val)
-            })
-        };
-        ($data:expr, $path:expr, $pattern:pat) => {
-            $data.assert_matches($path, |value| matches!(value, $pattern))
-        };
-    }
-
-
-    #[test]
-    fn primitive_values() -> Result<(), ParserError> {
-        let input = r#"
-            mock mock {
-                string          <- "hello world"
-                empty           <- ""
-                quotes          <- "abc_\"123\"_def"
-                true            <- true
-                false           <- false
-                number          <- 123
-                negative        <- -123
-                float           <- 0.123
-                negative_float  <- -0.123
-            }
-        "#;
-
-        let data = parser!(input);
-
-        assert_value!(data, "mock::string", Value::String  { value: "hello world", .. });
-        assert_value!(data, "mock::empty", Value::String  { value: "", .. });
-        assert_value!(data, "mock::quotes", Value::String  { value: "abc_\\\"123\\\"_def", .. });
-
-        assert_value!(data, "mock::true",   Value::Boolean { value: true, .. });
-        assert_value!(data, "mock::false",  Value::Boolean { value: false, .. });
-
-        assert_value!(data, "mock::number", Value::Numeric { value: "123", .. });
-        assert_value!(data, "mock::negative", Value::Numeric { value: "-123", .. });
-        assert_value!(data, "mock::float",  Value::Numeric { value: "0.123", .. });
-        assert_value!(data, "mock::negative_float",  Value::Numeric { value: "-0.123", .. });
-
-        Ok(())
     }
 }
 
@@ -236,5 +153,88 @@ impl Direction {
             Direction::Input => "<-",
             Direction::Output => "->",
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::BTreeMap;
+    use crate::dsl::error::ParserError;
+    use crate::dsl::parser::{Identifier, NodeInstruct, Value};
+    use crate::NodeParser;
+
+    struct TestHelper {
+        data: BTreeMap<Identifier, NodeInstruct>,
+    }
+
+    impl TestHelper {
+        pub fn assert_matches(&self, path: &str, expected_pattern: impl Fn(&Value) -> bool) {
+            let mut parts = path.split("::");
+            let module = parts.next().unwrap();
+            let property = parts.next().unwrap();
+
+            let value = self.data.get(&Identifier(module.to_string()))
+                .and_then(|value| value.inputs.get(property))
+                .expect("Value not found");
+
+            assert!(expected_pattern(value), "Value at {} did not match expected pattern", path);
+        }
+    }
+
+    macro_rules! parser {
+        ($input:expr) => {{
+            let data = NodeParser::new($input)?.evaluate()?;
+            TestHelper { data }
+        }};
+    }
+
+    macro_rules! assert_value {
+        ($data:expr, $path:expr, Value::Numeric { value: $val:expr, .. }) => {
+            $data.assert_matches($path, |value| {
+                matches!(value, Value::Numeric { value, .. } if value == $val)
+            })
+        };
+        ($data:expr, $path:expr, Value::String { value: $val:expr, .. }) => {
+            $data.assert_matches($path, |value| {
+                matches!(value, Value::String { value, .. } if value == $val)
+            })
+        };
+        ($data:expr, $path:expr, $pattern:pat) => {
+            $data.assert_matches($path, |value| matches!(value, $pattern))
+        };
+    }
+
+
+    #[test]
+    fn primitive_values() -> Result<(), ParserError> {
+        let input = r#"
+            mock mock {
+                string          <- "hello world"
+                empty           <- ""
+                quotes          <- "abc_\"123\"_def"
+                true            <- true
+                false           <- false
+                number          <- 123
+                negative        <- -123
+                float           <- 0.123
+                negative_float  <- -0.123
+            }
+        "#;
+
+        let data = parser!(input);
+
+        assert_value!(data, "mock::string", Value::String  { value: "hello world", .. });
+        assert_value!(data, "mock::empty", Value::String  { value: "", .. });
+        assert_value!(data, "mock::quotes", Value::String  { value: "abc_\\\"123\\\"_def", .. });
+
+        assert_value!(data, "mock::true",   Value::Boolean { value: true, .. });
+        assert_value!(data, "mock::false",  Value::Boolean { value: false, .. });
+
+        assert_value!(data, "mock::number", Value::Numeric { value: "123", .. });
+        assert_value!(data, "mock::negative", Value::Numeric { value: "-123", .. });
+        assert_value!(data, "mock::float",  Value::Numeric { value: "0.123", .. });
+        assert_value!(data, "mock::negative_float",  Value::Numeric { value: "-0.123", .. });
+
+        Ok(())
     }
 }
