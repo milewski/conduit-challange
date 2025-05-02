@@ -34,7 +34,7 @@ This will generate the `libconduit_example_lib.so` file (or `.dll` on Windows, `
 ### 2. Install Node.js Dependencies
 
 ```bash
-# From the node_js_example directory
+# From the node-js-example directory
 yarn install
 # or
 npm install
@@ -43,7 +43,7 @@ npm install
 ### 3. Run the Example
 
 ```bash
-# From the node_js_example directory
+# From the node-js-example directory
 yarn test
 # or
 npm test
