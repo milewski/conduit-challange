@@ -1,6 +1,11 @@
-# Conduit - Node-Based Workflow DSL
-
+<p align="center"><img width="250" src="/art/logo.svg"></p>
+<p align="center">
+A UI-less node-based system
+</p>
+<p align="center">
 Conduit is a domain-specific language (DSL) for creating node-based workflows in Rust. It enables you to build complex data processing pipelines with a simple, declarative syntax.
+</p>
+
 
 ## Table of Contents
 - [Quick Start](#quick-start)
