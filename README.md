@@ -31,20 +31,22 @@ use conduit::Engine;
 use conduit_derive::Node;
 
 #[derive(Node)]
-pub struct HelloWorld {
-    pub hello: Input<String>,
+pub struct Logger {
+    pub left: Input<String>,
+    pub right: Input<String>,
 }
 
-impl ExecutableNode for HelloWorld {
+impl ExecutableNode for Logger {
     fn run(&self) {
-        println!("hello {}", self.hello.read());
+        println!("{} {}", self.left.read(), self.right.read());
     }
 }
 
 fn main() {
     let workflow = r#"
-        hello_world {
-            hello <- "world"
+        logger {
+            left <- "hello"
+            right <- "world"
         }
     "#;
 
