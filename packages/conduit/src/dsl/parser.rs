@@ -66,7 +66,7 @@ impl From<&str> for Identifier {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Component)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash, Component)]
 pub enum Value {
     String {
         direction: Direction,
@@ -117,7 +117,7 @@ impl NodeInstruct {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, Component)]
+#[derive(Debug, PartialEq, Clone, Copy,Eq, Hash, Component)]
 pub enum Direction {
     Input,
     Output,
@@ -161,8 +161,8 @@ mod test {
     use std::collections::BTreeMap;
     use crate::dsl::error::ParserError;
     use crate::dsl::parser::{Identifier, NodeInstruct, Value};
-    use crate::NodeParser;
-
+    use crate::dsl::parser::NodeParser;
+    
     struct TestHelper {
         data: BTreeMap<Identifier, NodeInstruct>,
     }

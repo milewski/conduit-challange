@@ -66,7 +66,7 @@ impl Visitor {
     pub fn visit_node(&mut self, node: Pair<Rule>) -> Result<&NodeInstruct, ParserError> {
         let mut pairs = node.into_inner();
         let first = pairs.next().unwrap_or_else(|| unreachable!()); // Ensure there's at least one element
-
+        
         let (mut node, body) = match first.as_rule() {
             Rule::identifier => {
                 let module = pairs.next().unwrap_or_else(|| unreachable!());

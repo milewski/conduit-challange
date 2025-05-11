@@ -1,5 +1,5 @@
 nodes = { SOI ~ (anonymous_node | node)* ~ EOI }
-node = { identifier ~  module ~ body }
+node = { identifier ~ module ~ body }
 anonymous_node = { module ~ body }
 
 body = { "{" ~ parameter* ~ "}" }
@@ -23,11 +23,11 @@ number = @{
 boolean = { "true" | "false" }
 relation = { identifier ~ "::" ~ property }
 
-value = { number | string | boolean | relation | node | anonymous_node | identifier }
+value = { number | string | boolean | node | anonymous_node | relation | identifier }
 
 direction = { "<-" | "->" }
 identifier = @{ (ASCII_ALPHA | "_")+ }
-module = @{ (ASCII_ALPHA | "_")+ }
+module = ${ identifier ~ ("::" ~ property)? }
 property = @{ (ASCII_ALPHA | "_")+ }
 
 WHITESPACE = _{ " " | NEWLINE }
