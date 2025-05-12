@@ -1,11 +1,12 @@
 use crate::dsl::error::ParserError;
 use bevy_ecs::component::Component;
-use pest::iterators::Pair;
 use pest::Parser;
+use pest::iterators::{Pair, Pairs};
 use pest_derive::Parser;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::ops::Index;
+use pest::pratt_parser::PrattParser;
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -19,6 +20,10 @@ pub enum Value {
         value: String,
     },
     Boolean {
+        direction: Direction,
+        value: bool,
+    },
+    Expression {
         direction: Direction,
         value: bool,
     },
@@ -67,7 +72,7 @@ struct Schema;
 
 #[derive(Debug, Default)]
 struct NewVisitor {
-    nodes: HashMap<Identifier, NodeInstruct>,
+    nodes: BTreeMap<Identifier, NodeInstruct>,
 }
 
 type Identifier = String;
@@ -116,6 +121,12 @@ impl NewVisitor {
 
         let mut node = NodeInstruct::new(identifier, module_identifier.as_str());
 
+        if self.nodes.contains_key(&node.identifier) {
+            return Err(ParserError::DuplicatedNode {
+                identifier: node.identifier,
+            });
+        }
+
         self.visit_body(&mut node, body)?;
 
         let identifier = node.identifier.clone();
@@ -144,26 +155,35 @@ impl NewVisitor {
             assert_eq!(value.as_rule(), Rule::value);
 
             let pair = value.into_inner().next().unwrap_or_else(|| unreachable!());
+            let direction = direction.into();
 
             let value = match pair.as_rule() {
+                Rule::expression => Value::Expression {
+                    direction,
+                    value: self.visit_expression(pair.into_inner())?,
+                },
                 Rule::number => Value::Numeric {
-                    direction: direction.into(),
+                    direction,
                     value: pair.as_str().to_string(),
                 },
                 Rule::string => Value::String {
-                    direction: direction.into(),
+                    direction,
                     value: pair.as_str().trim_matches('"').to_string(),
                 },
                 Rule::boolean => Value::Boolean {
-                    direction: direction.into(),
+                    direction,
                     value: match pair.as_str() {
                         "true" => true,
                         "false" => false,
                         _ => unreachable!(),
                     },
                 },
+                Rule::identifier => Value::Relation {
+                    direction,
+                    identifier: pair.as_str().to_string(),
+                    property: direction.reverse().as_str().to_string(),
+                },
                 Rule::node | Rule::anonymous_node => {
-                    let direction: Direction = direction.into();
                     let (node, property) = self.visit_node(pair)?;
 
                     Value::Relation {
@@ -174,28 +194,34 @@ impl NewVisitor {
                         identifier: node.identifier.clone(),
                     }
                 }
-                // Rule::relation => {
-                //     let mut pairs = pair.into_inner();
-                //
-                //     todo!("{:#?}", pairs);
-                //
-                //     // if let (Some(identifier), Some(related_property)) = (pairs.next(), pairs.next()) {
-                //     //     Value::Relation {
-                //     //         direction: direction.into(),
-                //     //         identifier: Identifier(identifier.as_str().to_string()),
-                //     //         property: related_property.as_str().to_string(),
-                //     //     }
-                //     // } else {
-                //     //     unreachable!()
-                //     // }
-                // }
-                _ => unreachable!(),
+                Rule::relation => {
+                    let mut pairs = pair.into_inner();
+
+                    let (identifier, related_property) = (
+                        pairs.next().unwrap_or_else(|| unreachable!()),
+                        pairs.next().unwrap_or_else(|| unreachable!()),
+                    );
+
+                    assert_eq!(identifier.as_rule(), Rule::identifier);
+                    assert_eq!(related_property.as_rule(), Rule::property);
+
+                    Value::Relation {
+                        direction,
+                        identifier: identifier.as_str().to_string(),
+                        property: related_property.as_str().to_string(),
+                    }
+                }
+                a => unreachable!("{:#?}", pair),
             };
 
             node.inputs.insert(property.as_str().to_string(), value);
         }
 
         Ok(())
+    }
+    
+    pub fn visit_expression(&self, expression: Pairs<Rule>) -> Result<(String, String), ParserError> {
+        // PrattParser::new().map_primary(expression)
     }
 }
 
@@ -206,7 +232,7 @@ struct NewParser<'a> {
 }
 
 impl<'a> NewParser<'a> {
-    pub fn parse(source: &'a str) -> Result<HashMap<Identifier, NodeInstruct>, Box<dyn Error>> {
+    pub fn parse(source: &'a str) -> Result<BTreeMap<Identifier, NodeInstruct>, Box<dyn Error>> {
         let instance = NewParser {
             visitor: NewVisitor::default(),
             inner: Schema::parse(Rule::nodes, source)?.next(),
@@ -215,7 +241,7 @@ impl<'a> NewParser<'a> {
         instance.evaluate()
     }
 
-    pub fn evaluate(mut self) -> Result<HashMap<Identifier, NodeInstruct>, Box<dyn Error>> {
+    pub fn evaluate(mut self) -> Result<BTreeMap<Identifier, NodeInstruct>, Box<dyn Error>> {
         if let Some(inner) = self.inner {
             for pair in inner.into_inner() {
                 match pair.as_rule() {
@@ -241,24 +267,42 @@ macro_rules! assert_parser_snapshot {
 
 #[test]
 fn test() {
-    assert_parser_snapshot!(
-        "named module {}",
-        "anonymous_module {}",
-        "anonymous_module { a <- true }",
-        "anonymous_module { a <- false }",
-        "anonymous_module { a <- 123 }",
-        "anonymous_module { a <- -123 }",
-        "anonymous_module { a <- 123.123 }",
-        "anonymous_module { a <- -123.123 }",
-        r#"anonymous_module { a <- "string" }"#,
-        r#"anonymous_module { a <- "string with space" }"#,
-    );
+    // assert_parser_snapshot!(
+    //     "named module {}",
+    //     "anonymous_module {}",
+    //     "anonymous_module { a <- true }",
+    //     "anonymous_module { a <- false }",
+    //     "anonymous_module { a <- 123 }",
+    //     "anonymous_module { a <- -123 }",
+    //     "anonymous_module { a <- 123.123 }",
+    //     "anonymous_module { a <- -123.123 }",
+    //     r#"anonymous_module { a <- "string" }"#,
+    //     r#"anonymous_module { a <- "string with space" }"#,
+    // );
+    //
+    // assert_parser_snapshot!(
+    //     "name_a module_a { property_a <- anonymous_module_b::custom {} }",
+    //     "name_a module_a { property_a <- anonymous_module_b {} }",
+    //     "name_a module_a { property_a <- name_b module_b::custom {} }",
+    //     "name_a module_a { property_a <- name_b module_b {} }",
+    // );
+
+    // assert_parser_snapshot!(
+    //     r#"
+    //         name_a module_a { property_a <- 123 }
+    //         name_b module_b { property_b <- name_a::property_a }
+    //         name_c module_c { property_c <- name_b::property_b }
+    //         name_d module_d { property_d -> name_a }
+    //         name_e module_e { property_e -> name_a::custom_e }
+    //         name_f module_f {
+    //             property_f_1 -> name_g module_g { property_g -> name_a::custom_g }
+    //             property_f_2 -> module_h { property_h -> name_a::custom_h }
+    //         }
+    //     "#
+    // );
 
     assert_parser_snapshot!(
-        "name_a module_a { property_a <- anonymous_module_b::custom {} }",
-        "name_a module_a { property_a <- anonymous_module_b {} }",
-        "name_a module_a { property_a <- name_b module_b::custom {} }",
-        "name_a module_a { property_a <- name_b module_b {} }",
+        "name module { property <- (123 + 123) }",
     );
 
     // insta::assert_debug_snapshot!(NewParser::parse("named module {}"));

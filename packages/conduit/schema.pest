@@ -23,11 +23,21 @@ number = @{
 boolean = { "true" | "false" }
 relation = { identifier ~ "::" ~ property }
 
-value = { number | string | boolean | node | anonymous_node | relation | identifier }
+value = { numeric | string | boolean | node | anonymous_node | relation | identifier }
+
+expression = { numeric ~ (operation ~ numeric)* }
+numeric = _{ number | module | "(" ~ expression ~ ")" }
+
+operation = _{ add | subtract | multiply | divide | power }
+    add      = { "+" }
+    subtract = { "-" }
+    multiply = { "*" }
+    divide   = { "/" }
+    power    = { "^" }
 
 direction = { "<-" | "->" }
 identifier = @{ (ASCII_ALPHA | "_")+ }
 module = ${ identifier ~ ("::" ~ property)? }
-property = @{ (ASCII_ALPHA | "_")+ }
+property = @{ (ASCII_ALPHA | ASCII_DIGIT | "_")+ }
 
 WHITESPACE = _{ " " | NEWLINE }
