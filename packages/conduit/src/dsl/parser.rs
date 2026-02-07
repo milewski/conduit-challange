@@ -138,7 +138,7 @@ impl Visitor {
         let kind = node.as_rule();
         let mut pairs = node.into_inner();
 
-        let (identifier, module, body) = match kind {
+        let (identifier, module, body_or_shorthand) = match kind {
             Rule::node => (
                 pairs.next().map(|pair| pair.as_str()),
                 pairs.next().unwrap_or_else(|| unreachable!()),
@@ -163,13 +163,34 @@ impl Visitor {
             });
         }
 
-        self.visit_body(&mut node, body)?;
+        match body_or_shorthand.as_rule() {
+            Rule::body => self.visit_body(&mut node, body_or_shorthand)?,
+            Rule::shorthand => self.visit_shorthand(&mut node, body_or_shorthand)?,
+            _ => unreachable!(),
+        }
 
         let identifier = node.identifier.clone();
 
         self.nodes.insert(identifier.clone(), node);
 
         Ok((self.nodes.index(&identifier), module_property))
+    }
+
+    pub fn visit_shorthand(&mut self, node: &mut NodeInstruct, shorthand: Pair<Rule>) -> Result<(), ParserError> {
+        assert_eq!(shorthand.as_rule(), Rule::shorthand);
+
+        let mut pairs = shorthand.into_inner();
+        let direction_pair = pairs.next().unwrap_or_else(|| unreachable!());
+        let value_pair = pairs.next().unwrap_or_else(|| unreachable!());
+
+        let direction: Direction = direction_pair.into();
+        let property = direction.as_str().to_string();
+
+        let inner = value_pair.into_inner().next().unwrap_or_else(|| unreachable!());
+        let value = self.visit_value(inner, direction)?;
+
+        node.inputs.insert(property, value);
+        Ok(())
     }
 
     pub fn visit_body(&mut self, node: &mut NodeInstruct, body: Pair<Rule>) -> Result<(), ParserError> {
@@ -190,70 +211,74 @@ impl Visitor {
             assert_eq!(direction.as_rule(), Rule::direction);
             assert_eq!(value.as_rule(), Rule::value);
 
-            let pair = value.into_inner().next().unwrap_or_else(|| unreachable!());
-            let direction = direction.into();
+            let inner = value.into_inner().next().unwrap_or_else(|| unreachable!());
+            let direction: Direction = direction.into();
 
-            let value = match pair.as_rule() {
-                Rule::expression => Value::Expression {
-                    direction,
-                    value: self.visit_expression(pair.into_inner())?,
-                },
-                Rule::number => Value::Numeric {
-                    direction,
-                    value: pair.as_str().to_string(),
-                },
-                Rule::string => Value::String {
-                    direction,
-                    value: pair.as_str().trim_matches('"').to_string(),
-                },
-                Rule::boolean => Value::Boolean {
-                    direction,
-                    value: match pair.as_str() {
-                        "true" => true,
-                        "false" => false,
-                        _ => unreachable!(),
-                    },
-                },
-                Rule::identifier => Value::Relation {
-                    direction,
-                    identifier: pair.as_str().to_string(),
-                    property: direction.reverse().as_str().to_string(),
-                },
-                Rule::node | Rule::anonymous_node => {
-                    let (node, property) = self.visit_node(pair)?;
-
-                    Value::Relation {
-                        direction,
-                        property: property
-                            .map(|property| property.as_str().to_string())
-                            .unwrap_or_else(|| direction.reverse().as_str().to_string()),
-                        identifier: node.identifier.clone(),
-                    }
-                }
-                Rule::relation => {
-                    let mut pairs = pair.into_inner();
-
-                    let (identifier, related_property) = (
-                        pairs.next().unwrap_or_else(|| unreachable!()),
-                        pairs.next().unwrap_or_else(|| unreachable!()),
-                    );
-
-                    assert_eq!(identifier.as_rule(), Rule::identifier);
-                    assert_eq!(related_property.as_rule(), Rule::property);
-
-                    Value::Relation {
-                        direction,
-                        identifier: identifier.as_str().to_string(),
-                        property: related_property.as_str().to_string(),
-                    }
-                }
-                _ => unreachable!("{:#?}", pair),
-            };
+            let value = self.visit_value(inner, direction)?;
 
             node.inputs.insert(property.as_str().to_string(), value);
         }
 
         Ok(())
+    }
+
+    fn visit_value(&mut self, pair: Pair<Rule>, direction: Direction) -> Result<Value, ParserError> {
+        match pair.as_rule() {
+            Rule::expression => Ok(Value::Expression {
+                direction,
+                value: self.visit_expression(pair.into_inner())?,
+            }),
+            Rule::number => Ok(Value::Numeric {
+                direction,
+                value: pair.as_str().to_string(),
+            }),
+            Rule::string => Ok(Value::String {
+                direction,
+                value: pair.as_str().trim_matches('"').to_string(),
+            }),
+            Rule::boolean => Ok(Value::Boolean {
+                direction,
+                value: match pair.as_str() {
+                    "true" => true,
+                    "false" => false,
+                    _ => unreachable!(),
+                },
+            }),
+            Rule::identifier => Ok(Value::Relation {
+                direction,
+                identifier: pair.as_str().to_string(),
+                property: direction.reverse().as_str().to_string(),
+            }),
+            Rule::node | Rule::anonymous_node => {
+                let (node, property) = self.visit_node(pair)?;
+
+                Ok(Value::Relation {
+                    direction,
+                    property: property
+                        .map(|property| property.as_str().to_string())
+                        .unwrap_or_else(|| direction.reverse().as_str().to_string()),
+                    identifier: node.identifier.clone(),
+                })
+            }
+            Rule::relation => {
+                let mut pairs = pair.into_inner();
+
+                let (identifier, related_property) = (
+                    pairs.next().unwrap_or_else(|| unreachable!()),
+                    pairs.next().unwrap_or_else(|| unreachable!()),
+                );
+
+                assert_eq!(identifier.as_rule(), Rule::identifier);
+                assert_eq!(related_property.as_rule(), Rule::property);
+
+                Ok(Value::Relation {
+                    direction,
+                    identifier: identifier.as_str().to_string(),
+                    property: related_property.as_str().to_string(),
+                })
+            }
+            _ => unreachable!("{:#?}", pair),
+        }
     }
 
     pub fn visit_expression(&self, expression: Pairs<Rule>) -> Result<Expr, ParserError> {
@@ -490,6 +515,62 @@ mod tests {
                 a module_a { x <- 10 }
                 b module_b { y <- 20 }
                 c module_c { z <- (a::x * b::y + 1) }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_shorthand_basic() {
+        assert_parser_snapshot!(
+            // anonymous node with shorthand input
+            r#"module_a <- "hello""#,
+            // named node with shorthand input
+            r#"name module_a <- "hello""#,
+            // shorthand with number
+            r#"name module_a <- 42"#,
+            // shorthand with boolean
+            r#"name module_a <- true"#,
+            // shorthand with identifier (node ref)
+            r#"
+                name_a module_a <- 123
+                name_b module_b <- name_a
+            "#,
+            // shorthand with output direction
+            r#"
+                name_a module_a <- 123
+                name_b module_b -> name_a
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_shorthand_chaining() {
+        assert_parser_snapshot!(
+            // chaining: named nodes
+            r#"name_a module_a <- name_b module_b <- "hello""#,
+            // chaining: anonymous inner node
+            r#"name_a module_a <- module_b <- "hello""#,
+            // triple chain
+            r#"name_a module_a <- name_b module_b <- name_c module_c <- 42"#,
+        );
+    }
+
+    #[test]
+    fn test_shorthand_mixed_with_body() {
+        assert_parser_snapshot!(
+            // outer uses body, inner uses shorthand
+            r#"
+                name_a module_a {
+                    input <- name_b module_b <- "hello"
+                    extra <- 123
+                }
+            "#,
+            // shorthand node used as value alongside body nodes
+            r#"
+                name_a module_a {
+                    input <- name_b module_b <- "hello"
+                    output -> name_c module_c <- 42
+                }
             "#,
         );
     }

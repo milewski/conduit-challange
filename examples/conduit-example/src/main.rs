@@ -9,11 +9,7 @@ fn main() {
             height <- 1024
         }
 
-        metadata metadata {
-            input <- source read_file {
-                input <- "./examples/conduit-example/cover.png"
-            }
-        }
+        metadata metadata <- source read_file <- "./examples/conduit-example/cover.png"
 
         resizer {
             source <- source
