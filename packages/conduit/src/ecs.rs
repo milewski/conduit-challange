@@ -201,7 +201,7 @@ fn resolve_inputs(
             }
             Value::Expression { value: expr, direction } if *direction == Direction::Input => {
                 let result = eval_expr(expr, outputs, nodes);
-                if result.fract() == 0.0 && result >= 0.0 && result <= u32::MAX as f64 {
+                if result >= 0.0 && result <= u32::MAX as f64 {
                     payload.insert(name.clone(), Arc::new(result as u32) as SharedValue);
                 } else {
                     payload.insert(name.clone(), Arc::new(result) as SharedValue);
@@ -466,6 +466,29 @@ mod tests {
         let img_level = levels.iter().position(|l| l.contains(&index_map["img"])).unwrap();
 
         assert!(config_level < img_level, "config must execute before img");
+    }
+
+    #[test]
+    fn test_resolve_expression_with_division() {
+        let nodes = NodeParser::parse(
+            r#"
+                config constants { size <- 545 }
+                img resizer { height <- (config::size / 2) }
+            "#,
+        )
+        .unwrap();
+
+        // Simulate config node having already produced its output
+        let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
+        let mut config_out = HashMap::new();
+        config_out.insert("size".to_string(), Arc::new(545u32) as SharedValue);
+        outputs.insert("config".to_string(), config_out);
+
+        let instruct = &nodes[&String::from("img")];
+        let payload = resolve_inputs(instruct, &outputs, &nodes);
+
+        // 545 / 2 = 272.5, which should be truncated to 272
+        assert_eq!(*payload["height"].downcast_ref::<u32>().unwrap(), 272);
     }
 
     #[test]

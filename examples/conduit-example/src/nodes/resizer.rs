@@ -6,7 +6,7 @@ use image::imageops;
 use std::io::Cursor;
 
 #[derive(Node, Default)]
-pub struct Resizer {}
+pub struct Resizer;
 
 #[derive(NodeInput)]
 pub struct ResizerInput {
@@ -21,13 +21,16 @@ impl ExecutableNode for Resizer {
     type Output = Vec<u8>;
 
     async fn run(&self, input: Self::Input) -> Result<Self::Output, NodeError> {
-        let image = image::load_from_memory(&input.source).map_err(|e| NodeError::Custom(e.to_string()))?;
+        let image = image::load_from_memory(&input.source).map_err(|error| NodeError::Custom(error.to_string()))?;
         let image = image.resize_to_fill(input.width, input.height, imageops::FilterType::Lanczos3);
+
         let mut buffer = Vec::new();
         let mut cursor = Cursor::new(&mut buffer);
+
         image
             .write_to(&mut cursor, image::ImageFormat::Png)
-            .map_err(|e| NodeError::Custom(e.to_string()))?;
+            .map_err(|error| NodeError::Custom(error.to_string()))?;
+
         Ok(buffer)
     }
 }

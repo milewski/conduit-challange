@@ -17,8 +17,8 @@ fn main() {
 
         resizer {
             source <- source
-            width <- (metadata::width * 2)
-            height <- (metadata::height * 2)
+            width <- (metadata::width / 2)
+            height <- (metadata::height / 2)
             output -> write_file {
                 destination <- "./examples/conduit-example/cover.smaller.png"
             }
