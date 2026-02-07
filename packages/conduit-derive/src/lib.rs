@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Fields, FieldsNamed, Ident};
+use syn::{Data, DeriveInput, Fields, FieldsNamed, Ident, parse_macro_input};
 
 /// Derive macro for automatically implementing the Descriptor trait, From<Payload> trait,
 /// and registering the node with the NodeRegistry
@@ -12,19 +12,17 @@ pub fn derive_node(input: TokenStream) -> TokenStream {
 
     // Extract the fields from the struct
     let fields = match &input.data {
-        Data::Struct(data) => {
-            match &data.fields {
-                Fields::Named(fields) => fields,
-                _ => panic!("Node derive only works on structs with named fields"),
-            }
-        }
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(fields) => fields,
+            _ => panic!("Node derive only works on structs with named fields"),
+        },
         _ => panic!("Node derive only works on structs"),
     };
 
     // Generate implementations
     let descriptor_impl = generate_descriptor_impl(name, fields);
     let from_payload_impl = generate_from_payload_impl(name, fields);
-    
+
     // Generate registration code
     let name_str = name.to_string();
     let registration_impl = quote! {
@@ -37,12 +35,12 @@ pub fn derive_node(input: TokenStream) -> TokenStream {
                 // Use as_str() to convert String to &str
                 registry.register::<#name>(node_name.as_str());
             }
-            
+
             fn type_name() -> &'static str {
                 #name_str
             }
         }
-        
+
         // Add this node to the inventory
         inventory::submit! {
             conduit::registry::NodeRegistration::new::<#name>()
@@ -52,9 +50,9 @@ pub fn derive_node(input: TokenStream) -> TokenStream {
     // Combine the implementations
     let expanded = quote! {
         #descriptor_impl
-        
+
         #from_payload_impl
-        
+
         #registration_impl
     };
 
@@ -102,13 +100,13 @@ fn generate_descriptor_impl(name: &Ident, fields: &FieldsNamed) -> proc_macro2::
             fn name(&self) -> &'static str {
                 #struct_name_lowercase
             }
-            
+
             fn fields(&self) -> Vec<conduit::traits::FieldType> {
                 vec![
                     #(#field_types),*
                 ]
             }
-            
+
             fn take_outputs(self: Box<Self>) -> Vec<(&'static str, conduit::node::SharedValue)> {
                 vec![
                     #(#output_fields),*

@@ -36,7 +36,7 @@ pub extern "C" fn conduit_run_pipeline(engine: *mut ConduitEngine, pipeline: *co
     }
 
     let engine = unsafe { &mut *engine };
-    
+
     let c_str = unsafe { CStr::from_ptr(pipeline) };
     let pipeline_str = match c_str.to_str() {
         Ok(s) => s,

@@ -1,7 +1,7 @@
 use crate::node::SharedValue;
 use crate::traits::ExecutableNode;
-use std::collections::HashMap;
 use heck::ToSnakeCase;
+use std::collections::HashMap;
 
 pub struct NodeRegistry {
     factories: HashMap<String, fn(value: Payload) -> Box<dyn ExecutableNode>>,
@@ -27,7 +27,7 @@ impl NodeRegistration {
             register_fn: |registry| T::register_type(registry),
         }
     }
-    
+
     pub fn register(&self, registry: &mut NodeRegistry) {
         (self.register_fn)(registry);
     }
@@ -38,9 +38,7 @@ inventory::collect!(NodeRegistration);
 
 impl NodeRegistry {
     pub fn new() -> Self {
-        Self {
-            factories: HashMap::new(),
-        }
+        Self { factories: HashMap::new() }
     }
 
     pub fn register<F: ExecutableNode + for<'a> From<Payload> + 'static>(&mut self, name: &str) {
@@ -54,7 +52,7 @@ impl NodeRegistry {
     pub fn has(&self, name: &str) -> bool {
         self.factories.contains_key(name)
     }
-    
+
     pub fn register_all(&mut self) {
         for registration in inventory::iter::<NodeRegistration> {
             registration.register(self);

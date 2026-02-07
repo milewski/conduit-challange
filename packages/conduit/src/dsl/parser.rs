@@ -1,10 +1,10 @@
 use crate::dsl::error::ParserError;
 use pest::Parser;
 use pest::iterators::{Pair, Pairs};
+use pest::pratt_parser::{Assoc, Op, PrattParser};
 use pest_derive::Parser;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Index;
-use pest::pratt_parser::{Assoc, Op, PrattParser};
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -319,9 +319,7 @@ impl Visitor {
                     related.inputs.insert(target_prop, relation);
                 }
                 None => {
-                    return Err(ParserError::ModuleNotDefined {
-                        identifier: target_id,
-                    });
+                    return Err(ParserError::ModuleNotDefined { identifier: target_id });
                 }
             }
         }
@@ -426,9 +424,7 @@ mod tests {
 
     #[test]
     fn test_expression_basic() {
-        assert_parser_snapshot!(
-            "name module { property <- (123 + 123) }",
-        );
+        assert_parser_snapshot!("name module { property <- (123 + 123) }",);
     }
 
     #[test]
