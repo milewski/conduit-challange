@@ -190,6 +190,7 @@ dependencies = [
  "heck",
  "insta",
  "inventory",
+ "num-traits",
  "pest",
  "pest_derive",
  "petgraph",

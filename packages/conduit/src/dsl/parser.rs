@@ -106,7 +106,7 @@ struct Schema;
 pub type Identifier = String;
 pub type Property = String;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct NodeInstruct {
     pub identifier: Identifier,
     pub module: String,
@@ -125,9 +125,16 @@ impl NodeInstruct {
     }
 }
 
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
+pub struct ParsedWorkflow {
+    pub nodes: BTreeMap<Identifier, NodeInstruct>,
+    pub inputs: BTreeMap<Identifier, Option<Value>>,
+}
+
 #[derive(Debug, Default)]
 struct Visitor {
     nodes: BTreeMap<Identifier, NodeInstruct>,
+    inputs: BTreeMap<Identifier, Option<Value>>,
 }
 
 impl Visitor {
@@ -222,6 +229,29 @@ impl Visitor {
         Ok(())
     }
 
+    pub fn visit_input_def(&mut self, pair: Pair<Rule>) -> Result<(), ParserError> {
+        assert_eq!(pair.as_rule(), Rule::input_def);
+        let mut pairs = pair.into_inner();
+
+        let identifier = pairs.next().unwrap_or_else(|| unreachable!());
+        assert_eq!(identifier.as_rule(), Rule::identifier);
+        let name = identifier.as_str().to_string();
+
+        let value = if let Some(val_pair) = pairs.next() {
+            // Check if there is a value provided
+            let inner = val_pair.into_inner().next().unwrap_or_else(|| unreachable!());
+            Some(self.visit_value(inner, Direction::Input)?)
+        } else {
+            None
+        };
+
+        if self.inputs.contains_key(&name) {
+            return Err(ParserError::DuplicatedNode { identifier: name });
+        }
+        self.inputs.insert(name, value);
+        Ok(())
+    }
+
     pub fn visit_pipeline_result(&mut self, pair: Pair<Rule>) -> Result<(), ParserError> {
         assert_eq!(pair.as_rule(), Rule::pipeline_result);
 
@@ -312,6 +342,13 @@ impl Visitor {
                         let property = pairs.next().unwrap().as_str().to_string();
                         Ok(Expression::Reference { identifier, property })
                     }
+                    Rule::identifier => {
+                        let identifier = primary.as_str().to_string();
+                        Ok(Expression::Reference {
+                            identifier,
+                            property: "output".to_string(),
+                        })
+                    }
                     Rule::expression => self.visit_expression(primary.into_inner()),
                     rule => unreachable!("unexpected primary rule: {:?}", rule),
                 }
@@ -369,6 +406,9 @@ impl Visitor {
                     related.inputs.insert(target_prop, relation);
                 }
                 None => {
+                    if self.inputs.contains_key(&target_id) {
+                        continue;
+                    }
                     return Err(ParserError::ModuleNotDefined { identifier: target_id });
                 }
             }
@@ -387,7 +427,7 @@ pub struct NodeParser<'a> {
 }
 
 impl<'a> NodeParser<'a> {
-    pub fn parse(source: &'a str) -> Result<BTreeMap<Identifier, NodeInstruct>, ParserError> {
+    pub fn parse(source: &'a str) -> Result<ParsedWorkflow, ParserError> {
         let instance = NodeParser {
             visitor: Visitor::default(),
             inner: Schema::parse(Rule::nodes, source)?.next(),
@@ -396,7 +436,7 @@ impl<'a> NodeParser<'a> {
         instance.evaluate()
     }
 
-    pub fn evaluate(mut self) -> Result<BTreeMap<Identifier, NodeInstruct>, ParserError> {
+    pub fn evaluate(mut self) -> Result<ParsedWorkflow, ParserError> {
         if let Some(inner) = self.inner {
             for pair in inner.into_inner() {
                 match pair.as_rule() {
@@ -406,6 +446,9 @@ impl<'a> NodeParser<'a> {
                     Rule::pipeline_result => {
                         self.visitor.visit_pipeline_result(pair)?;
                     }
+                    Rule::input_def => {
+                        self.visitor.visit_input_def(pair)?;
+                    }
                     Rule::EOI => continue,
                     _ => unreachable!(),
                 };
@@ -413,7 +456,10 @@ impl<'a> NodeParser<'a> {
         }
 
         self.visitor.link()?;
-        Ok(self.visitor.nodes)
+        Ok(ParsedWorkflow {
+            nodes: self.visitor.nodes,
+            inputs: self.visitor.inputs,
+        })
     }
 }
 
@@ -424,7 +470,8 @@ macro_rules! assert_parser_snapshot {
             insta::with_settings!({
                 filters => vec![(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", "[UUID]")]
             }, {
-                insta::assert_debug_snapshot!(NodeParser::parse($input));
+                let nodes = NodeParser::parse($input).map(|res| res.nodes);
+                insta::assert_debug_snapshot!(nodes);
             });
         )+
     };
@@ -593,5 +640,33 @@ mod tests {
                 }
             "#,
         );
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    #[test]
+    fn test_pipeline_inputs() {
+        let input = r#"
+            -> width <- 100
+            -> height <- 200
+            node module {
+                w <- width
+                h <- height
+            }
+        "#;
+        let workflow = NodeParser::parse(input).expect("Failed to parse");
+        assert!(workflow.inputs.contains_key("width"));
+        assert!(workflow.inputs.contains_key("height"));
+
+        let width_val = workflow.inputs.get("width").unwrap();
+        // 100 is parsed as Numeric
+        if let Some(Value::Numeric { value, .. }) = width_val {
+            assert_eq!(value, "100");
+        } else {
+            panic!("Expected Numeric value for width");
+        }
     }
 }

@@ -1,4 +1,5 @@
-nodes = { SOI ~ NEWLINE* ~ ((pipeline_result | anonymous_node | node) ~ NEWLINE*)* ~ EOI }
+nodes = { SOI ~ NEWLINE* ~ ((input_def | pipeline_result | anonymous_node | node) ~ NEWLINE*)* ~ EOI }
+input_def = { "->" ~ identifier ~ ("<-" ~ value)? }
 pipeline_result = { "<-" ~ value }
 node = { identifier ~ module ~ (shorthand | body) }
 anonymous_node = { module ~ (shorthand | body) }
@@ -29,7 +30,7 @@ relation = { identifier ~ "::" ~ property }
 value = { string | boolean | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier }
 
 expression = { numeric ~ (operation ~ numeric)* }
-numeric = _{ number | relation | "(" ~ expression ~ ")" }
+numeric = _{ number | relation | identifier | "(" ~ expression ~ ")" }
 
 operation = _{ add | subtract | multiply | divide | power }
     add      = { "+" }

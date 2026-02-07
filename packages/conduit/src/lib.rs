@@ -44,7 +44,7 @@ pub extern "C" fn conduit_run_pipeline(engine: *mut ConduitEngine, pipeline: *co
         Err(_) => return false,
     };
 
-    let _: Result<(), _> = engine.0.run_pipeline_blocking(pipeline_str);
+    let _: Result<(), _> = engine.0.run_pipeline_blocking(pipeline_str, ());
     true
 }
 

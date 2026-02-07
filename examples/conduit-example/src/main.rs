@@ -1,9 +1,19 @@
 use conduit::Engine;
+use conduit_derive::NodeOutput;
 
 mod nodes;
 
+#[derive(NodeOutput)]
+struct Input {
+    width: u32,
+    height: u32,
+}
+
 fn main() {
     let pipeline = r#"
+        -> width <- metadata::width
+        -> height <- 1024
+
         constants _ {
             width <- 512
             height <- 1024
@@ -13,18 +23,22 @@ fn main() {
 
         <- resizer {
             source <- source
-            width <- (metadata::width / 2)
-            height <- (metadata::height / 2)
+            width <- (width / 2)
+            height <- (height / 2)
             output -> write_file {
                 destination <- "./examples/conduit-example/cover.smaller.png"
             }
         }
     "#;
-
     let mut engine = Engine::new();
 
-    match engine.run_pipeline_blocking::<Vec<u8>>(pipeline) {
-        Ok(data) => println!("Pipeline result: {} bytes", data.len()),
+    let input = Input {
+        width: 123,
+        height: 456,
+    };
+
+    match engine.run_pipeline_blocking::<Input, Vec<u8>>(pipeline, input) {
+        Ok(data) => println!("Pipeline result: {} bytes image", data.len()),
         Err(e) => println!("Pipeline error: {}", e),
     }
 }

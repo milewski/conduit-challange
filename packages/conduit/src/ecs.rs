@@ -1,9 +1,10 @@
 use crate::dsl::parser::{
-    Direction, Expression, Identifier, NodeInstruct, NodeParser, Operation, PIPELINE_RESULT_ID, Value,
+    Direction, Expression, Identifier, NodeInstruct, NodeParser, Operation, PIPELINE_RESULT_ID, ParsedWorkflow, Value,
 };
 use crate::node::FromSharedValue;
 use crate::node::SharedValue;
 use crate::registry::{NodeRegistry, Payload};
+use crate::traits::NodeOutput;
 use petgraph::Direction as GraphDirection;
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{BTreeMap, HashMap};
@@ -25,14 +26,18 @@ impl Engine {
         }
     }
 
-    pub fn run_pipeline_blocking<T: FromSharedValue>(&mut self, workflow: &str) -> Result<T, crate::node::NodeError> {
-        self.runtime.block_on(self.run_pipeline_async(workflow))
+    pub fn run_pipeline_blocking<I: NodeOutput, T: FromSharedValue>(
+        &mut self,
+        workflow: &str,
+        input: I,
+    ) -> Result<T, crate::node::NodeError> {
+        self.runtime.block_on(self.run_pipeline_async(workflow, input))
     }
 
     pub fn validate_modules(&self, nodes: &BTreeMap<Identifier, NodeInstruct>) -> Result<(), String> {
         for (_, instruct) in nodes {
             let module_name = &instruct.module;
-            if module_name != "_" && !self.registry.has(module_name) {
+            if module_name != "_" && module_name != "__input__" && !self.registry.has(module_name) {
                 return Err(format!(
                     "Unknown module '{}' in node '{}'",
                     module_name, instruct.identifier
@@ -42,8 +47,31 @@ impl Engine {
         Ok(())
     }
 
-    pub async fn run_pipeline_async<T: FromSharedValue>(&self, workflow: &str) -> Result<T, crate::node::NodeError> {
-        let nodes = NodeParser::parse(workflow).unwrap();
+    pub async fn run_pipeline_async<I: NodeOutput, T: FromSharedValue>(
+        &self,
+        workflow: &str,
+        input: I,
+    ) -> Result<T, crate::node::NodeError> {
+        let ParsedWorkflow {
+            mut nodes,
+            inputs: input_definitions,
+        } = NodeParser::parse(workflow).unwrap();
+
+        // Create nodes for inputs
+        let mut input_names = std::collections::HashSet::new();
+
+        for (name, default_value) in &input_definitions {
+            input_names.insert(name.clone());
+
+            let node_name = format!("__input_{}", name);
+            let mut instruct = NodeInstruct::new(Some(&node_name), "__input__");
+
+            if let Some(val) = default_value {
+                instruct.inputs.insert("default".to_string(), val.clone());
+            }
+
+            nodes.insert(node_name, instruct);
+        }
 
         // Validate that all modules are either registered or are ignored (_)
         if let Err(e) = self.validate_modules(&nodes) {
@@ -57,6 +85,13 @@ impl Engine {
 
         let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
 
+        // Prepare runtime inputs
+        let runtime_inputs_vec = input.into_outputs();
+        let runtime_inputs: HashMap<String, SharedValue> = runtime_inputs_vec
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+
         // Pre-populate outputs from data-only nodes (ignored modules or unregistered for legacy support).
         // These act as constant/config holders whose literal inputs are
         // made available as outputs for expression references.
@@ -68,7 +103,7 @@ impl Engine {
             }
 
             if instruct.module == "_" || !self.registry.has(&instruct.module) {
-                outputs.insert(id.clone(), resolve_inputs(instruct, &outputs, &nodes));
+                outputs.insert(id.clone(), resolve_inputs(instruct, &outputs, &nodes, &input_names));
             }
         }
 
@@ -80,12 +115,34 @@ impl Engine {
                 let id = &graph[idx];
                 let instruct = &nodes[id];
 
+                if instruct.module == "__input__" {
+                    let payload = resolve_inputs(instruct, &outputs, &nodes, &input_names);
+                    let default_value = payload.get("default").cloned();
+
+                    // The original input name is extracted from the node name (removing __input_ prefix)
+                    let name = id.strip_prefix("__input_").unwrap();
+                    let value = if let Some(v) = runtime_inputs.get(name) {
+                        v.clone()
+                    } else if let Some(v) = default_value {
+                        v
+                    } else {
+                        // If no default value and no runtime input, this is an error?
+                        // For now we panic as per other error handling in this file
+                        panic!("Missing input '{}'", name);
+                    };
+
+                    let mut map = HashMap::new();
+                    map.insert("output".to_string(), value);
+                    outputs.insert(id.clone(), map);
+                    continue;
+                }
+
                 // Skip data-only nodes (marked with _ or others pre-resolved) — already resolved above
                 if instruct.module == "_" || !self.registry.has(&instruct.module) {
                     continue;
                 }
 
-                let payload = resolve_inputs(instruct, &outputs, &nodes);
+                let payload = resolve_inputs(instruct, &outputs, &nodes, &input_names);
                 let module_name = instruct.module.clone();
                 let registry = self.registry.clone();
 
@@ -116,7 +173,7 @@ impl Engine {
         // Resolve and return the pipeline result if defined
         if has_result {
             let result_instruct = &nodes[PIPELINE_RESULT_ID];
-            let resolved = resolve_inputs(result_instruct, &outputs, &nodes);
+            let resolved = resolve_inputs(result_instruct, &outputs, &nodes, &input_names);
             if let Some(value) = resolved.into_values().next() {
                 T::from_shared_value(&value)
             } else {
@@ -154,19 +211,31 @@ fn build_dependency_graph(
                     direction,
                 } => match direction {
                     Direction::Input => {
-                        if let (Some(&from), Some(&to)) = (index_map.get(dep_id), index_map.get(id)) {
+                        let dep_idx = index_map
+                            .get(dep_id)
+                            .or_else(|| index_map.get(&format!("__input_{}", dep_id)));
+
+                        if let (Some(&from), Some(&to)) = (dep_idx, index_map.get(id)) {
                             graph.add_edge(from, to, property.clone());
                         }
                     }
                     Direction::Output => {
-                        if let (Some(&from), Some(&to)) = (index_map.get(id), index_map.get(dep_id)) {
+                        let dep_idx = index_map
+                            .get(dep_id)
+                            .or_else(|| index_map.get(&format!("__input_{}", dep_id)));
+
+                        if let (Some(&from), Some(&to)) = (index_map.get(id), dep_idx) {
                             graph.add_edge(from, to, prop.clone());
                         }
                     }
                 },
                 Value::Expression { value: expr, .. } => {
                     for (ref_id, _) in collect_expr_refs(expr) {
-                        if let (Some(&from), Some(&to)) = (index_map.get(ref_id), index_map.get(id)) {
+                        let ref_idx = index_map
+                            .get(ref_id)
+                            .or_else(|| index_map.get(&format!("__input_{}", ref_id)));
+
+                        if let (Some(&from), Some(&to)) = (ref_idx, index_map.get(id)) {
                             graph.add_edge(from, to, prop.clone());
                         }
                     }
@@ -215,6 +284,7 @@ fn resolve_inputs(
     instruct: &NodeInstruct,
     outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
     nodes: &BTreeMap<Identifier, NodeInstruct>,
+    input_names: &std::collections::HashSet<String>,
 ) -> Payload {
     let mut payload = HashMap::new();
 
@@ -227,7 +297,7 @@ fn resolve_inputs(
                 payload.insert(name.clone(), Arc::new(value.parse::<u32>().unwrap()) as SharedValue);
             }
             Value::Expression { value: expr, direction } if *direction == Direction::Input => {
-                let result = evaluate_expression(expr, outputs, nodes);
+                let result = evaluate_expression(expr, outputs, nodes, input_names);
                 if result >= 0.0 && result <= u32::MAX as f64 {
                     payload.insert(name.clone(), Arc::new(result as u32) as SharedValue);
                 } else {
@@ -245,6 +315,24 @@ fn resolve_inputs(
                 if let Some(dep_outputs) = outputs.get(identifier) {
                     if let Some(val) = dep_outputs.get(property) {
                         payload.insert(name.clone(), val.clone());
+                    } else if property == "output" && input_names.contains(identifier) {
+                        // Fallback to global input if property is output (or implied)
+                        // And identifier is an input name
+                        let input_node_id = format!("__input_{}", identifier);
+                        if let Some(dep_outputs) = outputs.get(&input_node_id) {
+                            if let Some(val) = dep_outputs.get("output") {
+                                payload.insert(name.clone(), val.clone());
+                            }
+                        }
+                    }
+                } else if input_names.contains(identifier) {
+                    // Not found in outputs (maybe didn't run yet? or not a node?)
+                    // If it is an input, check the input node output
+                    let input_node_id = format!("__input_{}", identifier);
+                    if let Some(dep_outputs) = outputs.get(&input_node_id) {
+                        if let Some(val) = dep_outputs.get("output") {
+                            payload.insert(name.clone(), val.clone());
+                        }
                     }
                 }
             }
@@ -274,6 +362,7 @@ fn evaluate_expression(
     expression: &Expression,
     outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
     nodes: &BTreeMap<Identifier, NodeInstruct>,
+    input_names: &std::collections::HashSet<String>,
 ) -> f64 {
     match expression {
         Expression::Number(value) => value.parse::<f64>().unwrap(),
@@ -284,12 +373,28 @@ fn evaluate_expression(
                     return shared_value_to_f64(value);
                 }
             }
+
+            // Try global input fallback if property is default "output" or "input" (depending on how it was parsed)
+            // Actually parser converts `height` to `Relation { identifier: "height", property: "output" }` (reversed from Input).
+            // So property is "output".
+            if property == "output" && input_names.contains(identifier) {
+                let input_node_id = format!("__input_{}", identifier);
+                if let Some(dep_outputs) = outputs.get(&input_node_id) {
+                    // println!("Keys in {}: {:?}", input_node_id, dep_outputs.keys());
+                    if let Some(value) = dep_outputs.get("output") {
+                        return shared_value_to_f64(value);
+                    }
+                }
+            }
+
             // Fall back to literal inputs from parsed node (data-only nodes)
             if let Some(instruct) = nodes.get(identifier) {
                 if let Some(value) = instruct.inputs.get(property) {
                     return match value {
                         Value::Numeric { value, .. } => value.parse::<f64>().unwrap(),
-                        Value::Expression { value: inner, .. } => evaluate_expression(inner, outputs, nodes),
+                        Value::Expression { value: inner, .. } => {
+                            evaluate_expression(inner, outputs, nodes, input_names)
+                        }
                         _ => panic!("Expression reference '{}::{}' is not numeric", identifier, property),
                     };
                 }
@@ -297,8 +402,8 @@ fn evaluate_expression(
             panic!("Cannot resolve '{}::{}' in expression", identifier, property);
         }
         Expression::BinaryOperation { operation, left, right } => {
-            let left = evaluate_expression(left, outputs, nodes);
-            let right = evaluate_expression(right, outputs, nodes);
+            let left = evaluate_expression(left, outputs, nodes, input_names);
+            let right = evaluate_expression(right, outputs, nodes, input_names);
 
             match operation {
                 Operation::Add => left + right,
@@ -333,7 +438,7 @@ mod tests {
 
     #[test]
     fn test_build_graph_no_dependencies() {
-        let nodes = NodeParser::parse(
+        let parsed = NodeParser::parse(
             r#"
                 a module_a { x <- 1 }
                 b module_b { y <- 2 }
@@ -342,7 +447,7 @@ mod tests {
         )
         .unwrap();
 
-        let (graph, _) = build_dependency_graph(&nodes);
+        let (graph, _) = build_dependency_graph(&parsed.nodes);
         let levels = compute_execution_levels(&graph);
 
         assert_eq!(levels.len(), 1, "all independent nodes should be at level 0");
@@ -351,7 +456,7 @@ mod tests {
 
     #[test]
     fn test_build_graph_linear_chain() {
-        let nodes = NodeParser::parse(
+        let parsed = NodeParser::parse(
             r#"
                 a module_a { x <- 1 }
                 b module_b { y <- a::x }
@@ -360,7 +465,7 @@ mod tests {
         )
         .unwrap();
 
-        let (graph, index_map) = build_dependency_graph(&nodes);
+        let (graph, index_map) = build_dependency_graph(&parsed.nodes);
         let levels = compute_execution_levels(&graph);
 
         assert_eq!(levels.len(), 3, "linear chain should have 3 levels");
@@ -386,7 +491,7 @@ mod tests {
 
     #[test]
     fn test_build_graph_diamond() {
-        let nodes = NodeParser::parse(
+        let parsed = NodeParser::parse(
             r#"
                 source module_s { x <- 1 }
                 left module_l { y <- source::x }
@@ -396,7 +501,7 @@ mod tests {
         )
         .unwrap();
 
-        let (graph, index_map) = build_dependency_graph(&nodes);
+        let (graph, index_map) = build_dependency_graph(&parsed.nodes);
         let levels = compute_execution_levels(&graph);
 
         let source_level = levels
@@ -423,7 +528,7 @@ mod tests {
 
     #[test]
     fn test_resolve_literal_inputs() {
-        let nodes = NodeParser::parse(
+        let parsed = NodeParser::parse(
             r#"
                 a module_a {
                     s <- "hello"
@@ -434,9 +539,10 @@ mod tests {
         )
         .unwrap();
 
-        let instruct = &nodes[&String::from("a")];
+        let instruct = &parsed.nodes[&String::from("a")];
         let outputs = HashMap::new();
-        let payload = resolve_inputs(instruct, &outputs, &nodes);
+        let input_names = std::collections::HashSet::new();
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
 
         assert_eq!(payload.len(), 3);
         assert_eq!(*payload["s"].downcast_ref::<String>().unwrap(), "hello");
@@ -446,18 +552,19 @@ mod tests {
 
     #[test]
     fn test_resolve_expression_literal_only() {
-        let nodes = NodeParser::parse(r#"a module_a { x <- (10 + 20) }"#).unwrap();
+        let parsed = NodeParser::parse(r#"a module_a { x <- (10 + 20) }"#).unwrap();
 
-        let instruct = &nodes[&String::from("a")];
+        let instruct = &parsed.nodes[&String::from("a")];
         let outputs = HashMap::new();
-        let payload = resolve_inputs(instruct, &outputs, &nodes);
+        let input_names = std::collections::HashSet::new();
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
 
         assert_eq!(*payload["x"].downcast_ref::<u32>().unwrap(), 30);
     }
 
     #[test]
     fn test_resolve_expression_with_ref() {
-        let nodes = NodeParser::parse(
+        let parsed = NodeParser::parse(
             r#"
                 config constants { multiplier <- 4 }
                 img resizer { width <- (32 * config::multiplier) }
@@ -471,15 +578,16 @@ mod tests {
         config_out.insert("multiplier".to_string(), Arc::new(4u32) as SharedValue);
         outputs.insert("config".to_string(), config_out);
 
-        let instruct = &nodes[&String::from("img")];
-        let payload = resolve_inputs(instruct, &outputs, &nodes);
+        let instruct = &parsed.nodes[&String::from("img")];
+        let input_names = std::collections::HashSet::new();
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
 
         assert_eq!(*payload["width"].downcast_ref::<u32>().unwrap(), 128);
     }
 
     #[test]
     fn test_expression_creates_dependency_edge() {
-        let nodes = NodeParser::parse(
+        let parsed = NodeParser::parse(
             r#"
                 config constants { multiplier <- 4 }
                 img resizer { width <- (32 * config::multiplier) }
@@ -487,7 +595,7 @@ mod tests {
         )
         .unwrap();
 
-        let (graph, index_map) = build_dependency_graph(&nodes);
+        let (graph, index_map) = build_dependency_graph(&parsed.nodes);
         let levels = compute_execution_levels(&graph);
 
         let config_level = levels.iter().position(|l| l.contains(&index_map["config"])).unwrap();
@@ -498,7 +606,7 @@ mod tests {
 
     #[test]
     fn test_resolve_expression_with_division() {
-        let nodes = NodeParser::parse(
+        let parsed = NodeParser::parse(
             r#"
                 config constants { size <- 545 }
                 img resizer { height <- (config::size / 2) }
@@ -512,8 +620,9 @@ mod tests {
         config_out.insert("size".to_string(), Arc::new(545u32) as SharedValue);
         outputs.insert("config".to_string(), config_out);
 
-        let instruct = &nodes[&String::from("img")];
-        let payload = resolve_inputs(instruct, &outputs, &nodes);
+        let instruct = &parsed.nodes[&String::from("img")];
+        let input_names = std::collections::HashSet::new();
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
 
         // 545 / 2 = 272.5, which should be truncated to 272
         assert_eq!(*payload["height"].downcast_ref::<u32>().unwrap(), 272);
@@ -521,7 +630,7 @@ mod tests {
 
     #[test]
     fn test_resolve_expression_multi_ref() {
-        let nodes = NodeParser::parse(
+        let parsed = NodeParser::parse(
             r#"
                 a module_a { x <- 10 }
                 b module_b { y <- 3 }
@@ -538,8 +647,9 @@ mod tests {
         b_out.insert("y".to_string(), Arc::new(3u32) as SharedValue);
         outputs.insert("b".to_string(), b_out);
 
-        let instruct = &nodes[&String::from("c")];
-        let payload = resolve_inputs(instruct, &outputs, &nodes);
+        let instruct = &parsed.nodes[&String::from("c")];
+        let input_names = std::collections::HashSet::new();
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
 
         // 10 + 3 * 2 = 16 (respects operator precedence)
         assert_eq!(*payload["z"].downcast_ref::<u32>().unwrap(), 16);
@@ -549,21 +659,22 @@ mod tests {
     #[should_panic(expected = "Unknown module 'invalid'")]
     fn test_invalid_module_panics() {
         let engine = Engine::new();
-        let nodes = NodeParser::parse(r#"a invalid { x <- 1 }"#).unwrap();
+        let parsed = NodeParser::parse(r#"a invalid { x <- 1 }"#).unwrap();
 
         // This should return Err, but we panic on error
-        if let Err(e) = engine.validate_modules(&nodes) {
+        if let Err(e) = engine.validate_modules(&parsed.nodes) {
             panic!("{}", e);
         }
     }
 
     #[test]
     fn test_ignored_module_underscore() {
-        let nodes = NodeParser::parse(r#"config _ { multiplier <- 5 }"#).unwrap();
+        let parsed = NodeParser::parse(r#"config _ { multiplier <- 5 }"#).unwrap();
 
-        let instruct = &nodes[&String::from("config")];
+        let instruct = &parsed.nodes[&String::from("config")];
         let outputs = HashMap::new();
-        let payload = resolve_inputs(instruct, &outputs, &nodes);
+        let input_names = std::collections::HashSet::new();
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
 
         // Should work without error, just returns the literal value
         assert_eq!(*payload["multiplier"].downcast_ref::<u32>().unwrap(), 5);
@@ -573,7 +684,7 @@ mod tests {
     fn test_pipeline_result_string() {
         let mut engine = Engine::new();
         let pipeline = r#"<- "hello world""#;
-        let result: String = engine.run_pipeline_blocking(pipeline).unwrap();
+        let result: String = engine.run_pipeline_blocking(pipeline, ()).unwrap();
         assert_eq!(result, "hello world");
     }
 
@@ -581,7 +692,7 @@ mod tests {
     fn test_pipeline_result_number() {
         let mut engine = Engine::new();
         let pipeline = r#"<- 42"#;
-        let result: u32 = engine.run_pipeline_blocking(pipeline).unwrap();
+        let result: u32 = engine.run_pipeline_blocking(pipeline, ()).unwrap();
         assert_eq!(result, 42);
     }
 
@@ -589,7 +700,7 @@ mod tests {
     fn test_pipeline_result_boolean() {
         let mut engine = Engine::new();
         let pipeline = r#"<- true"#;
-        let result: bool = engine.run_pipeline_blocking(pipeline).unwrap();
+        let result: bool = engine.run_pipeline_blocking(pipeline, ()).unwrap();
         assert_eq!(result, true);
     }
 
@@ -600,7 +711,7 @@ mod tests {
             config _ { output <- "from config" }
             <- config
         "#;
-        let result: String = engine.run_pipeline_blocking(pipeline).unwrap();
+        let result: String = engine.run_pipeline_blocking(pipeline, ()).unwrap();
         assert_eq!(result, "from config");
     }
 
@@ -608,7 +719,7 @@ mod tests {
     fn test_pipeline_no_result() {
         let mut engine = Engine::new();
         let pipeline = r#"config _ { value <- 42 }"#;
-        let result: Result<String, _> = engine.run_pipeline_blocking(pipeline);
+        let result: Result<String, _> = engine.run_pipeline_blocking(pipeline, ());
         assert!(result.is_err());
     }
 
@@ -616,7 +727,36 @@ mod tests {
     fn test_pipeline_result_type_mismatch() {
         let mut engine = Engine::new();
         let pipeline = r#"<- "hello""#;
-        let result: Result<u32, _> = engine.run_pipeline_blocking(pipeline);
+        let result: Result<u32, _> = engine.run_pipeline_blocking(pipeline, ());
         assert!(result.is_err());
     }
+}
+
+#[test]
+fn test_resolve_external_inputs() {
+    // Define a node that uses an external input
+    let parsed = NodeParser::parse(
+        r#"
+                -> external_val <- 10
+                node module {
+                    val <- external_val
+                }
+            "#,
+    )
+    .unwrap();
+
+    let instruct = &parsed.nodes[&String::from("node")];
+
+    // Simulate outputs containing the injected input
+    let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
+    let mut input_out = HashMap::new();
+    input_out.insert("output".to_string(), Arc::new(99u32) as SharedValue); // 99 overrides default 10
+    outputs.insert("__input_external_val".to_string(), input_out);
+
+    let mut input_names = std::collections::HashSet::new();
+    input_names.insert("external_val".to_string());
+
+    let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+
+    assert_eq!(*payload["val"].downcast_ref::<u32>().unwrap(), 99);
 }
