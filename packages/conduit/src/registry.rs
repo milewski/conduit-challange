@@ -50,6 +50,10 @@ impl NodeRegistry {
     pub fn create(&self, name: &str, settings: Payload) -> Option<Box<dyn ExecutableNode>> {
         self.factories.get(name).map(|factory| factory(settings))
     }
+
+    pub fn has(&self, name: &str) -> bool {
+        self.factories.contains_key(name)
+    }
     
     pub fn register_all(&mut self) {
         for registration in inventory::iter::<NodeRegistration> {

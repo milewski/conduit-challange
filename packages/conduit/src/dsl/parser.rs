@@ -8,6 +8,22 @@ use pest::pratt_parser::{Assoc, Op, PrattParser};
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
+pub enum Expr {
+    Number(String),
+    Ref { identifier: String, property: String },
+    BinOp { op: ExprOp, left: Box<Expr>, right: Box<Expr> },
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
+pub enum ExprOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Power,
+}
+
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum Value {
     String {
         direction: Direction,
@@ -23,7 +39,7 @@ pub enum Value {
     },
     Expression {
         direction: Direction,
-        value: String,
+        value: Expr,
     },
     Relation {
         identifier: Identifier,
@@ -230,37 +246,43 @@ impl Visitor {
         Ok(())
     }
 
-    pub fn visit_expression(&self, expression: Pairs<Rule>) -> Result<String, ParserError> {
+    pub fn visit_expression(&self, expression: Pairs<Rule>) -> Result<Expr, ParserError> {
         let pratt = PrattParser::new()
             .op(Op::infix(Rule::add, Assoc::Left) | Op::infix(Rule::subtract, Assoc::Left))
             .op(Op::infix(Rule::multiply, Assoc::Left) | Op::infix(Rule::divide, Assoc::Left))
             .op(Op::infix(Rule::power, Assoc::Right));
 
-        let result = pratt
-            .map_primary(|primary| -> Result<f64, ParserError> {
+        pratt
+            .map_primary(|primary| -> Result<Expr, ParserError> {
                 match primary.as_rule() {
-                    Rule::number => Ok(primary.as_str().parse::<f64>().unwrap()),
-                    Rule::expression => {
-                        self.visit_expression(primary.into_inner())
-                            .map(|s| s.parse::<f64>().unwrap())
+                    Rule::number => Ok(Expr::Number(primary.as_str().to_string())),
+                    Rule::relation => {
+                        let mut pairs = primary.into_inner();
+                        let identifier = pairs.next().unwrap().as_str().to_string();
+                        let property = pairs.next().unwrap().as_str().to_string();
+                        Ok(Expr::Ref { identifier, property })
                     }
+                    Rule::expression => self.visit_expression(primary.into_inner()),
                     rule => unreachable!("unexpected primary rule: {:?}", rule),
                 }
             })
             .map_infix(|lhs, op, rhs| {
                 let (lhs, rhs) = (lhs?, rhs?);
-                Ok(match op.as_rule() {
-                    Rule::add => lhs + rhs,
-                    Rule::subtract => lhs - rhs,
-                    Rule::multiply => lhs * rhs,
-                    Rule::divide => lhs / rhs,
-                    Rule::power => lhs.powf(rhs),
+                let op = match op.as_rule() {
+                    Rule::add => ExprOp::Add,
+                    Rule::subtract => ExprOp::Subtract,
+                    Rule::multiply => ExprOp::Multiply,
+                    Rule::divide => ExprOp::Divide,
+                    Rule::power => ExprOp::Power,
                     _ => unreachable!(),
+                };
+                Ok(Expr::BinOp {
+                    op,
+                    left: Box::new(lhs),
+                    right: Box::new(rhs),
                 })
             })
-            .parse(expression)?;
-
-        Ok(result.to_string())
+            .parse(expression)
     }
 
     /// Add bidirectional relations between linked nodes.
@@ -443,6 +465,25 @@ mod tests {
             r#"
                 name module_a {}
                 name module_b {}
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_expression_with_node_ref() {
+        assert_parser_snapshot!(
+            r#"
+                config constants { multiplier <- 4 }
+                name module { width <- (32 * config::multiplier) }
+            "#,
+            r#"
+                a module_a { x <- 10 }
+                b module_b { y <- (a::x + 5) }
+            "#,
+            r#"
+                a module_a { x <- 10 }
+                b module_b { y <- 20 }
+                c module_c { z <- (a::x * b::y + 1) }
             "#,
         );
     }

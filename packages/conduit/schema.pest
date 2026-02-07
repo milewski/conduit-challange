@@ -26,7 +26,7 @@ relation = { identifier ~ "::" ~ property }
 value = { string | boolean | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier }
 
 expression = { numeric ~ (operation ~ numeric)* }
-numeric = _{ number | module | "(" ~ expression ~ ")" }
+numeric = _{ number | relation | "(" ~ expression ~ ")" }
 
 operation = _{ add | subtract | multiply | divide | power }
     add      = { "+" }
