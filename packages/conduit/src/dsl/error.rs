@@ -1,4 +1,3 @@
-use crate::dsl::new_parser;
 use crate::dsl::parser::Rule;
 
 #[derive(thiserror::Error, Debug)]

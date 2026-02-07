@@ -1,72 +1,13 @@
 use crate::dsl::error::ParserError;
-use crate::dsl::visitor::Visitor;
-use bevy_ecs::component::Component;
-use pest::iterators::Pair;
 use pest::Parser;
+use pest::iterators::{Pair, Pairs};
 use pest_derive::Parser;
-use std::collections::BTreeMap;
-use std::fmt::{Display, Formatter};
-use std::ops::Deref;
+use std::collections::{BTreeMap, HashMap};
+use std::ops::Index;
+use pest::pratt_parser::{Assoc, Op, PrattParser};
 use uuid::Uuid;
 
-#[derive(Parser, Debug)]
-#[grammar = "schema.pest"]
-pub struct NodeParser {
-    inner: Pair<'static, Rule>,
-}
-
-impl NodeParser {
-    pub fn new(input: &str) -> Result<Self, ParserError> {
-        // Convert the input to a 'static lifetime - this is safe because we're parsing it immediately
-        // and not storing references to the original string
-        let input_static: &'static str = Box::leak(input.to_string().into_boxed_str());
-
-        Ok(NodeParser {
-            inner: NodeParser::parse(Rule::nodes, input_static)?.next().expect("invalid input..."),
-        })
-    }
-
-    pub fn evaluate(self) -> Result<BTreeMap<Identifier, NodeInstruct>, ParserError> {
-        let mut visitor = Visitor::default();
-
-        for pair in self.inner.into_inner() {
-            match pair.as_rule() {
-                Rule::node | Rule::anonymous_node => visitor.visit_node(pair)?,
-                Rule::EOI => continue,
-                _ => unreachable!(),
-            };
-        }
-
-        visitor.link()?;
-
-        Ok(visitor.take_nodes())
-    }
-}
-
-#[derive(Debug, Clone, Eq, Hash, PartialEq, Ord, PartialOrd, Component)]
-pub struct Identifier(pub String);
-
-impl Deref for Identifier {
-    type Target = String;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Display for Identifier {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<&str> for Identifier {
-    fn from(value: &str) -> Self {
-        Identifier(value.to_string())
-    }
-}
-
-#[derive(Debug, PartialEq, Clone, Eq, Hash, Component)]
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum Value {
     String {
         direction: Direction,
@@ -80,6 +21,10 @@ pub enum Value {
         direction: Direction,
         value: bool,
     },
+    Expression {
+        direction: Direction,
+        value: String,
+    },
     Relation {
         identifier: Identifier,
         direction: Direction,
@@ -90,47 +35,19 @@ pub enum Value {
 impl Value {
     pub fn direction(&self) -> Direction {
         match self {
-            Value::String { direction, .. } => direction.clone(),
-            Value::Numeric { direction, .. } => direction.clone(),
-            Value::Boolean { direction, .. } => direction.clone(),
-            Value::Relation { direction, .. } => direction.clone(),
+            Value::String { direction, .. }
+            | Value::Numeric { direction, .. }
+            | Value::Boolean { direction, .. }
+            | Value::Expression { direction, .. }
+            | Value::Relation { direction, .. } => *direction,
         }
     }
 }
 
-#[derive(Debug, Clone, Component)]
-pub struct NodeInstruct {
-    pub identifier: Identifier,
-    pub module: String,
-    pub inputs: BTreeMap<String, Value>,
-}
-
-impl NodeInstruct {
-    pub fn new(module: &str, identifier: Option<&str>) -> Self {
-        NodeInstruct {
-            identifier: identifier
-                .map(|identifier| Identifier(identifier.to_string()))
-                .unwrap_or_else(|| Identifier(Uuid::new_v4().to_string())),
-            module: module.to_string(),
-            inputs: BTreeMap::default(),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone, Copy,Eq, Hash, Component)]
+#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
 pub enum Direction {
     Input,
     Output,
-}
-
-impl From<&Pair<'_, Rule>> for Direction {
-    fn from(value: &Pair<'_, Rule>) -> Self {
-        match value.as_str() {
-            "<-" => Direction::Input,
-            "->" => Direction::Output,
-            _ => unreachable!(),
-        }
-    }
 }
 
 impl Direction {
@@ -147,94 +64,386 @@ impl Direction {
             Direction::Output => "output",
         }
     }
+}
 
-    fn as_symbol(self) -> &'static str {
-        match self {
-            Direction::Input => "<-",
-            Direction::Output => "->",
+impl From<Pair<'_, Rule>> for Direction {
+    fn from(value: Pair<'_, Rule>) -> Self {
+        match value.as_str() {
+            "<-" => Direction::Input,
+            "->" => Direction::Output,
+            _ => unreachable!(),
         }
     }
 }
 
-// #[cfg(test)]
-// mod test {
-//     use std::collections::BTreeMap;
-//     use crate::dsl::error::ParserError;
-//     use crate::dsl::parser::{Identifier, NodeInstruct, Value};
-//     use crate::dsl::parser::NodeParser;
-//     
-//     struct TestHelper {
-//         data: BTreeMap<Identifier, NodeInstruct>,
-//     }
-// 
-//     impl TestHelper {
-//         pub fn assert_matches(&self, path: &str, expected_pattern: impl Fn(&Value) -> bool) {
-//             let mut parts = path.split("::");
-//             let module = parts.next().unwrap();
-//             let property = parts.next().unwrap();
-// 
-//             let value = self.data.get(&Identifier(module.to_string()))
-//                 .and_then(|value| value.inputs.get(property))
-//                 .expect("Value not found");
-// 
-//             assert!(expected_pattern(value), "Value at {} did not match expected pattern", path);
-//         }
-//     }
-// 
-//     macro_rules! parser {
-//         ($input:expr) => {{
-//             let data = NodeParser::new($input)?.evaluate()?;
-//             TestHelper { data }
-//         }};
-//     }
-// 
-//     macro_rules! assert_value {
-//         ($data:expr, $path:expr, Value::Numeric { value: $val:expr, .. }) => {
-//             $data.assert_matches($path, |value| {
-//                 matches!(value, Value::Numeric { value, .. } if value == $val)
-//             })
-//         };
-//         ($data:expr, $path:expr, Value::String { value: $val:expr, .. }) => {
-//             $data.assert_matches($path, |value| {
-//                 matches!(value, Value::String { value, .. } if value == $val)
-//             })
-//         };
-//         ($data:expr, $path:expr, $pattern:pat) => {
-//             $data.assert_matches($path, |value| matches!(value, $pattern))
-//         };
-//     }
-// 
-// 
-//     #[test]
-//     fn primitive_values() -> Result<(), ParserError> {
-//         let input = r#"
-//             mock mock {
-//                 string          <- "hello world"
-//                 empty           <- ""
-//                 quotes          <- "abc_\"123\"_def"
-//                 true            <- true
-//                 false           <- false
-//                 number          <- 123
-//                 negative        <- -123
-//                 float           <- 0.123
-//                 negative_float  <- -0.123
-//             }
-//         "#;
-// 
-//         let data = parser!(input);
-// 
-//         assert_value!(data, "mock::string", Value::String  { value: "hello world", .. });
-//         assert_value!(data, "mock::empty", Value::String  { value: "", .. });
-//         assert_value!(data, "mock::quotes", Value::String  { value: "abc_\\\"123\\\"_def", .. });
-// 
-//         assert_value!(data, "mock::true",   Value::Boolean { value: true, .. });
-//         assert_value!(data, "mock::false",  Value::Boolean { value: false, .. });
-// 
-//         assert_value!(data, "mock::number", Value::Numeric { value: "123", .. });
-//         assert_value!(data, "mock::negative", Value::Numeric { value: "-123", .. });
-//         assert_value!(data, "mock::float",  Value::Numeric { value: "0.123", .. });
-//         assert_value!(data, "mock::negative_float",  Value::Numeric { value: "-0.123", .. });
-// 
-//         Ok(())
-//     }
-// }
+#[derive(Parser)]
+#[grammar = "schema.pest"]
+struct Schema;
+
+pub type Identifier = String;
+pub type Property = String;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct NodeInstruct {
+    pub identifier: Identifier,
+    pub module: String,
+    pub inputs: BTreeMap<Property, Value>,
+}
+
+impl NodeInstruct {
+    pub fn new(identifier: Option<&str>, module: &str) -> Self {
+        NodeInstruct {
+            identifier: identifier
+                .map(|identifier| identifier.to_string())
+                .unwrap_or_else(|| Uuid::new_v4().to_string()),
+            module: module.to_string(),
+            inputs: BTreeMap::default(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct Visitor {
+    nodes: BTreeMap<Identifier, NodeInstruct>,
+}
+
+impl Visitor {
+    pub fn visit_node<'a>(&'a mut self, node: Pair<'a, Rule>) -> Result<(&'a NodeInstruct, Option<Pair<'a, Rule>>), ParserError> {
+        let kind = node.as_rule();
+        let mut pairs = node.into_inner();
+
+        let (identifier, module, body) = match kind {
+            Rule::node => (
+                pairs.next().map(|pair| pair.as_str()),
+                pairs.next().unwrap_or_else(|| unreachable!()),
+                pairs.next().unwrap_or_else(|| unreachable!()),
+            ),
+            Rule::anonymous_node => (
+                None,
+                pairs.next().unwrap_or_else(|| unreachable!()),
+                pairs.next().unwrap_or_else(|| unreachable!()),
+            ),
+            _ => unreachable!(),
+        };
+
+        let mut module = module.into_inner();
+        let (module_identifier, module_property) = (module.next().unwrap_or_else(|| unreachable!()), module.next());
+
+        let mut node = NodeInstruct::new(identifier, module_identifier.as_str());
+
+        if self.nodes.contains_key(&node.identifier) {
+            return Err(ParserError::DuplicatedNode {
+                identifier: node.identifier,
+            });
+        }
+
+        self.visit_body(&mut node, body)?;
+
+        let identifier = node.identifier.clone();
+
+        self.nodes.insert(identifier.clone(), node);
+
+        Ok((self.nodes.index(&identifier), module_property))
+    }
+
+    pub fn visit_body(&mut self, node: &mut NodeInstruct, body: Pair<Rule>) -> Result<(), ParserError> {
+        assert_eq!(body.as_rule(), Rule::body);
+
+        for pair in body.into_inner() {
+            assert_eq!(pair.as_rule(), Rule::parameter);
+
+            let mut pairs = pair.into_inner();
+
+            let (property, direction, value) = (
+                pairs.next().unwrap_or_else(|| unreachable!()),
+                pairs.next().unwrap_or_else(|| unreachable!()),
+                pairs.next().unwrap_or_else(|| unreachable!()),
+            );
+
+            assert_eq!(property.as_rule(), Rule::property);
+            assert_eq!(direction.as_rule(), Rule::direction);
+            assert_eq!(value.as_rule(), Rule::value);
+
+            let pair = value.into_inner().next().unwrap_or_else(|| unreachable!());
+            let direction = direction.into();
+
+            let value = match pair.as_rule() {
+                Rule::expression => Value::Expression {
+                    direction,
+                    value: self.visit_expression(pair.into_inner())?,
+                },
+                Rule::number => Value::Numeric {
+                    direction,
+                    value: pair.as_str().to_string(),
+                },
+                Rule::string => Value::String {
+                    direction,
+                    value: pair.as_str().trim_matches('"').to_string(),
+                },
+                Rule::boolean => Value::Boolean {
+                    direction,
+                    value: match pair.as_str() {
+                        "true" => true,
+                        "false" => false,
+                        _ => unreachable!(),
+                    },
+                },
+                Rule::identifier => Value::Relation {
+                    direction,
+                    identifier: pair.as_str().to_string(),
+                    property: direction.reverse().as_str().to_string(),
+                },
+                Rule::node | Rule::anonymous_node => {
+                    let (node, property) = self.visit_node(pair)?;
+
+                    Value::Relation {
+                        direction,
+                        property: property
+                            .map(|property| property.as_str().to_string())
+                            .unwrap_or_else(|| direction.reverse().as_str().to_string()),
+                        identifier: node.identifier.clone(),
+                    }
+                }
+                Rule::relation => {
+                    let mut pairs = pair.into_inner();
+
+                    let (identifier, related_property) = (
+                        pairs.next().unwrap_or_else(|| unreachable!()),
+                        pairs.next().unwrap_or_else(|| unreachable!()),
+                    );
+
+                    assert_eq!(identifier.as_rule(), Rule::identifier);
+                    assert_eq!(related_property.as_rule(), Rule::property);
+
+                    Value::Relation {
+                        direction,
+                        identifier: identifier.as_str().to_string(),
+                        property: related_property.as_str().to_string(),
+                    }
+                }
+                _ => unreachable!("{:#?}", pair),
+            };
+
+            node.inputs.insert(property.as_str().to_string(), value);
+        }
+
+        Ok(())
+    }
+
+    pub fn visit_expression(&self, expression: Pairs<Rule>) -> Result<String, ParserError> {
+        let pratt = PrattParser::new()
+            .op(Op::infix(Rule::add, Assoc::Left) | Op::infix(Rule::subtract, Assoc::Left))
+            .op(Op::infix(Rule::multiply, Assoc::Left) | Op::infix(Rule::divide, Assoc::Left))
+            .op(Op::infix(Rule::power, Assoc::Right));
+
+        let result = pratt
+            .map_primary(|primary| -> Result<f64, ParserError> {
+                match primary.as_rule() {
+                    Rule::number => Ok(primary.as_str().parse::<f64>().unwrap()),
+                    Rule::expression => {
+                        self.visit_expression(primary.into_inner())
+                            .map(|s| s.parse::<f64>().unwrap())
+                    }
+                    rule => unreachable!("unexpected primary rule: {:?}", rule),
+                }
+            })
+            .map_infix(|lhs, op, rhs| {
+                let (lhs, rhs) = (lhs?, rhs?);
+                Ok(match op.as_rule() {
+                    Rule::add => lhs + rhs,
+                    Rule::subtract => lhs - rhs,
+                    Rule::multiply => lhs * rhs,
+                    Rule::divide => lhs / rhs,
+                    Rule::power => lhs.powf(rhs),
+                    _ => unreachable!(),
+                })
+            })
+            .parse(expression)?;
+
+        Ok(result.to_string())
+    }
+
+    /// Add bidirectional relations between linked nodes.
+    pub fn link(&mut self) -> Result<(), ParserError> {
+        let mut updates: Vec<(Identifier, Property, Value)> = Vec::new();
+
+        for (_, node) in self.nodes.iter() {
+            for (name, value) in &node.inputs {
+                if let Value::Relation {
+                    identifier,
+                    direction,
+                    property,
+                } = value
+                {
+                    updates.push((
+                        identifier.clone(),
+                        property.clone(),
+                        Value::Relation {
+                            identifier: node.identifier.clone(),
+                            direction: direction.reverse(),
+                            property: name.clone(),
+                        },
+                    ));
+                }
+            }
+        }
+
+        for (target_id, target_prop, relation) in updates {
+            match self.nodes.get_mut(&target_id) {
+                Some(related) => {
+                    if related.inputs.contains_key(&target_prop) {
+                        continue;
+                    }
+                    related.inputs.insert(target_prop, relation);
+                }
+                None => {
+                    return Err(ParserError::ModuleNotDefined {
+                        identifier: target_id,
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct NodeParser<'a> {
+    visitor: Visitor,
+    inner: Option<Pair<'a, Rule>>,
+}
+
+impl<'a> NodeParser<'a> {
+    pub fn parse(source: &'a str) -> Result<BTreeMap<Identifier, NodeInstruct>, ParserError> {
+        let instance = NodeParser {
+            visitor: Visitor::default(),
+            inner: Schema::parse(Rule::nodes, source)?.next(),
+        };
+
+        instance.evaluate()
+    }
+
+    pub fn evaluate(mut self) -> Result<BTreeMap<Identifier, NodeInstruct>, ParserError> {
+        if let Some(inner) = self.inner {
+            for pair in inner.into_inner() {
+                match pair.as_rule() {
+                    Rule::node | Rule::anonymous_node => {
+                        self.visitor.visit_node(pair)?;
+                    }
+                    Rule::EOI => continue,
+                    _ => unreachable!(),
+                };
+            }
+        }
+
+        self.visitor.link()?;
+        Ok(self.visitor.nodes)
+    }
+}
+
+#[macro_export]
+macro_rules! assert_parser_snapshot {
+    ( $( $input:expr ),+ $(,)? ) => {
+        $(
+            insta::with_settings!({
+                filters => vec![(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", "[UUID]")]
+            }, {
+                insta::assert_debug_snapshot!(NodeParser::parse($input));
+            });
+        )+
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_nodes() {
+        assert_parser_snapshot!(
+            "named module {}",
+            "anonymous_module {}",
+            "anonymous_module { a <- true }",
+            "anonymous_module { a <- false }",
+            "anonymous_module { a <- 123 }",
+            "anonymous_module { a <- -123 }",
+            "anonymous_module { a <- 123.123 }",
+            "anonymous_module { a <- -123.123 }",
+            r#"anonymous_module { a <- "string" }"#,
+            r#"anonymous_module { a <- "string with space" }"#,
+        );
+    }
+
+    #[test]
+    fn test_inline_nodes() {
+        assert_parser_snapshot!(
+            "name_a module_a { property_a <- anonymous_module_b::custom {} }",
+            "name_a module_a { property_a <- anonymous_module_b {} }",
+            "name_a module_a { property_a <- name_b module_b::custom {} }",
+            "name_a module_a { property_a <- name_b module_b {} }",
+        );
+    }
+
+    #[test]
+    fn test_relations_and_chaining() {
+        assert_parser_snapshot!(
+            r#"
+                name_a module_a { property_a <- 123 }
+                name_b module_b { property_b <- name_a::property_a }
+                name_c module_c { property_c <- name_b::property_b }
+                name_d module_d { property_d -> name_a }
+                name_e module_e { property_e -> name_a::custom_e }
+                name_f module_f {
+                    property_f_1 -> name_g module_g { property_g -> name_a::custom_g }
+                    property_f_2 -> name_h module_h { property_h -> name_a::custom_h }
+                }
+            "#
+        );
+    }
+
+    #[test]
+    fn test_expression_basic() {
+        assert_parser_snapshot!(
+            "name module { property <- (123 + 123) }",
+        );
+    }
+
+    #[test]
+    fn test_expression_arithmetic() {
+        assert_parser_snapshot!(
+            "name module { property <- (10 - 3) }",
+            "name module { property <- (6 * 7) }",
+            "name module { property <- (100 / 4) }",
+            "name module { property <- (2 ^ 10) }",
+        );
+    }
+
+    #[test]
+    fn test_expression_precedence() {
+        assert_parser_snapshot!(
+            "name module { property <- (2 + 3 * 4) }",
+            "name module { property <- ((2 + 3) * 4) }",
+            "name module { property <- (10 - 2 * 3) }",
+            "name module { property <- (10 / 2 + 3) }",
+        );
+    }
+
+    #[test]
+    fn test_expression_nested() {
+        assert_parser_snapshot!(
+            "name module { property <- ((1 + 2) * (3 + 4)) }",
+            "name module { property <- (((10))) }",
+        );
+    }
+
+    #[test]
+    fn test_duplicated_node_error() {
+        assert_parser_snapshot!(
+            r#"
+                name module_a {}
+                name module_b {}
+            "#,
+        );
+    }
+}

@@ -13,6 +13,7 @@ pest = { workspace = true }
 pest_derive = { workspace = true }
 thiserror = { workspace = true }
 inventory = { workspace = true }
-bevy_ecs = { workspace = true }
+petgraph = { workspace = true }
+tokio = { workspace = true }
 heck = "0.5.0"
-insta = "1.43.1"
+insta = { version = "1.43.1", features = ["filters"] }

@@ -1,10 +1,8 @@
 use crate::node::SharedValue;
 use crate::traits::ExecutableNode;
-use bevy_ecs::prelude::Resource;
 use std::collections::HashMap;
 use heck::ToSnakeCase;
 
-#[derive(Resource)]
 pub struct NodeRegistry {
     factories: HashMap<String, fn(value: Payload) -> Box<dyn ExecutableNode>>,
 }

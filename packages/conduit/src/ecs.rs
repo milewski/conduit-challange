@@ -1,222 +1,291 @@
-use crate::dsl::parser::{Direction, Identifier, NodeParser, Value};
-use crate::ecs;
+use crate::dsl::parser::{Direction, Identifier, NodeInstruct, NodeParser, Value};
 use crate::node::SharedValue;
-use crate::registry::NodeRegistry;
-use crate::traits::{Descriptor, ExecutableNode};
-use bevy_ecs::change_detection::{Res, ResMut};
-use bevy_ecs::component::Component;
-use bevy_ecs::entity::Entity;
-use bevy_ecs::prelude::{Commands, Query, Resource, Schedule, With, Without, World};
-use std::collections::HashMap;
+use crate::registry::{NodeRegistry, Payload};
+use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::Direction as GraphDirection;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 pub struct Engine {
-    world: World,
-    schedule: Schedule,
-    registry: NodeRegistry,
+    registry: Arc<NodeRegistry>,
+    runtime: tokio::runtime::Runtime,
 }
 
 impl Engine {
     pub fn new() -> Self {
+        let mut registry = NodeRegistry::new();
+        registry.register_all();
+
         Self {
-            world: World::new(),
-            schedule: Schedule::default(),
-            registry: NodeRegistry::new(),
+            registry: Arc::new(registry),
+            runtime: tokio::runtime::Runtime::new().unwrap(),
         }
     }
 
     pub fn run_pipeline(&mut self, workflow: &str) {
-        let parser = NodeParser::new(workflow);
-        let result = parser.unwrap().evaluate().unwrap();
-
-        // let mut world = World::new();
-        // let mut schedule = Schedule::default();
-        let mut registry = NodeRegistry::new();
-
-        // Register all nodes automatically using the inventory pattern
-        registry.register_all();
-
-        self.world.insert_resource(registry);
-        self.schedule.add_systems(ecs::setup);
-
-        let mut inputs = InputsMap::default();
-
-        for (id, instruct) in result.into_iter() {
-            self.world.spawn(Module { identifier: id.clone(), name: instruct.module.to_string() });
-
-            let parent = inputs.0.entry(id).or_default();
-
-            for (name, value) in instruct.inputs.into_iter() {
-                parent.entry(name).or_insert_with(|| {
-                    match value {
-                        Value::String { value, direction } => MaybeResolved::Resolved { direction, value: Arc::new(value) },
-                        Value::Numeric { value, direction } => MaybeResolved::Resolved { direction, value: Arc::new(value.parse::<u32>().unwrap()) },
-                        Value::Boolean { value, direction } => MaybeResolved::Resolved { direction, value: Arc::new(value) },
-                        Value::Relation { identifier, property, direction } => MaybeResolved::Unresolved { direction, identifier, property }
-                    }
-                });
-            }
-        }
-
-        self.world.insert_resource(inputs);
-
-        // Run the schedule until all nodes are processed
-        self.run_until_complete();
+        self.runtime.block_on(self.run_pipeline_async(workflow));
     }
 
-    // Function to run the schedule until all nodes are processed
-    pub fn run_until_complete(&mut self) {
-        let mut iterations = 0;
-        let max_iterations = 100; // Safety limit to prevent infinite loops
+    async fn run_pipeline_async(&self, workflow: &str) {
+        let nodes = NodeParser::parse(workflow).unwrap();
 
-        loop {
-            // Store the count of unprocessed nodes before running the schedule
-            let unprocessed_count_before = self.world.query_filtered::<Entity, (With<Module>, Without<Done>)>().iter(&self.world).count();
+        let (graph, index_map) = build_dependency_graph(&nodes);
+        let levels = compute_execution_levels(&graph);
 
-            if unprocessed_count_before == 0 {
-                // All nodes are processed
-                break;
+        let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
+
+        for level_indices in levels {
+            let mut handles = Vec::new();
+            let mut handle_ids = Vec::new();
+
+            for idx in level_indices {
+                let id = &graph[idx];
+                let instruct = &nodes[id];
+                let payload = resolve_inputs(instruct, &outputs);
+                let module_name = instruct.module.clone();
+                let registry = self.registry.clone();
+
+                handle_ids.push(id.clone());
+                handles.push(tokio::task::spawn_blocking(move || {
+                    let instance = registry
+                        .create(&module_name, payload)
+                        .unwrap_or_else(|| panic!("Module '{}' not found in registry", module_name));
+                    instance.run();
+                    instance.take_outputs()
+                }));
             }
 
-            // Run one tick of the schedule
-            self.schedule.run(&mut self.world);
-
-            // Check if any progress was made in this iteration
-            let unprocessed_count_after = self.world.query_filtered::<Entity, (With<Module>, Without<Done>)>().iter(&self.world).count();
-
-            iterations += 1;
-
-            // If no progress was made and we still have unprocessed nodes, we might have a deadlock
-            if unprocessed_count_before == unprocessed_count_after && iterations > 1 {
-                // Check if there are any unresolved inputs that could potentially be resolved
-                let inputs = self.world.get_resource::<InputsMap>().unwrap();
-                if !inputs.has_unresolved_nodes() {
-                    println!("Warning: No progress made and no more resolvable inputs. Possible deadlock detected.");
-                    break;
-                }
-            }
-
-            if iterations >= max_iterations {
-                println!("Warning: Reached maximum iterations limit ({}). There might be a circular dependency.", max_iterations);
-                break;
+            for (handle, id) in handles.into_iter().zip(handle_ids) {
+                let node_outputs = handle.await.unwrap();
+                let output_map: HashMap<String, SharedValue> = node_outputs
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect();
+                outputs.insert(id, output_map);
             }
         }
     }
 }
 
-#[derive(Component, Debug)]
-pub struct Module {
-    identifier: Identifier,
-    name: String,
+/// Build a directed dependency graph from parsed nodes.
+/// Edges point from dependency → dependent (data flow direction).
+fn build_dependency_graph(
+    nodes: &BTreeMap<Identifier, NodeInstruct>,
+) -> (DiGraph<Identifier, String>, HashMap<Identifier, NodeIndex>) {
+    let mut graph = DiGraph::new();
+    let mut index_map = HashMap::new();
+
+    for (id, _) in nodes {
+        let idx = graph.add_node(id.clone());
+        index_map.insert(id.clone(), idx);
+    }
+
+    for (id, instruct) in nodes {
+        for (prop, value) in &instruct.inputs {
+            if let Value::Relation {
+                identifier: dep_id,
+                property,
+                direction,
+            } = value
+            {
+                match direction {
+                    Direction::Input => {
+                        // current node depends on dep_id
+                        if let (Some(&from), Some(&to)) =
+                            (index_map.get(dep_id), index_map.get(id))
+                        {
+                            graph.add_edge(from, to, property.clone());
+                        }
+                    }
+                    Direction::Output => {
+                        // dep_id depends on current node
+                        if let (Some(&from), Some(&to)) =
+                            (index_map.get(id), index_map.get(dep_id))
+                        {
+                            graph.add_edge(from, to, prop.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (graph, index_map)
 }
 
-#[derive(Component, Debug)]
-pub struct Done;
+/// Compute execution levels via topological sort.
+/// Nodes at the same level have no mutual dependencies and can run in parallel.
+fn compute_execution_levels(graph: &DiGraph<Identifier, String>) -> Vec<Vec<NodeIndex>> {
+    let topo = petgraph::algo::toposort(graph, None)
+        .expect("Cycle detected in dependency graph");
 
-#[derive(Resource, Default)]
-struct IdentifierMap(HashMap<Identifier, Entity>);
+    let mut node_levels: HashMap<NodeIndex, usize> = HashMap::new();
 
-#[derive(Resource, Default, Debug)]
-pub struct InputsMap(HashMap<Identifier, HashMap<String, MaybeResolved>>);
+    for &idx in &topo {
+        let max_dep_level = graph
+            .neighbors_directed(idx, GraphDirection::Incoming)
+            .filter_map(|dep| node_levels.get(&dep).copied())
+            .max();
 
-impl InputsMap {
-    pub fn is_ready(&self, identifier: &Identifier) -> bool {
-        self.0.get(identifier)
-            .iter()
-            .all(|node| node.iter()
-                .filter(|(_, field)| match field {
-                    MaybeResolved::Resolved { direction, .. } => *direction == Direction::Input,
-                    MaybeResolved::Unresolved { direction, .. } => *direction == Direction::Input
-                })
-                .all(|(_, field)| matches!(field, MaybeResolved::Resolved { .. }))
-            )
-    }
-
-    pub fn all_inputs(&self, identifier: &Identifier) -> Option<HashMap<String, SharedValue>> {
-        self.0.get(identifier).map(|field| {
-            field.iter()
-                .filter(|(_, field)| matches!(field, MaybeResolved::Resolved {..}))
-                .map(|(name, value)| {
-                    match value {
-                        MaybeResolved::Resolved { value, .. } => (name.to_string(), value.clone()),
-                        MaybeResolved::Unresolved { .. } => unreachable!()
-                    }
-                })
-                .collect()
-        })
-    }
-
-    pub fn replace_outputs(&mut self, identifier: Identifier, property: &str, value: SharedValue) {
-        let relationship = {
-            if let Some(inner_map) = self.0.get(&identifier) {
-                if let Some(MaybeResolved::Unresolved { identifier, property, .. }) = inner_map.get(property) {
-                    Some((identifier.clone(), property.clone()))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+        let level = match max_dep_level {
+            Some(l) => l + 1,
+            None => 0,
         };
 
-        self.0.entry(identifier)
-            .or_default()
-            .entry(property.to_string())
-            .and_modify(|field| {
-                *field = MaybeResolved::Resolved {
-                    direction: Direction::Output,
-                    value: value.clone(),
-                };
-            });
+        node_levels.insert(idx, level);
+    }
 
-        if let Some((related_identifier, related_property)) = relationship {
-            self.replace_outputs(related_identifier, &related_property, value.clone());
+    let max_level = node_levels.values().max().copied().unwrap_or(0);
+    let mut levels = vec![Vec::new(); max_level + 1];
+
+    for &idx in &topo {
+        levels[node_levels[&idx]].push(idx);
+    }
+
+    levels
+}
+
+/// Resolve a node's inputs from literal values and dependency outputs.
+fn resolve_inputs(
+    instruct: &NodeInstruct,
+    outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
+) -> Payload {
+    let mut payload = HashMap::new();
+
+    for (name, value) in &instruct.inputs {
+        match value {
+            Value::String {
+                value, direction, ..
+            } if *direction == Direction::Input => {
+                payload.insert(name.clone(), Arc::new(value.clone()) as SharedValue);
+            }
+            Value::Numeric {
+                value, direction, ..
+            } if *direction == Direction::Input => {
+                payload.insert(
+                    name.clone(),
+                    Arc::new(value.parse::<u32>().unwrap()) as SharedValue,
+                );
+            }
+            Value::Boolean {
+                value, direction, ..
+            } if *direction == Direction::Input => {
+                payload.insert(name.clone(), Arc::new(*value) as SharedValue);
+            }
+            Value::Relation {
+                identifier,
+                property,
+                direction,
+            } if *direction == Direction::Input => {
+                if let Some(dep_outputs) = outputs.get(identifier) {
+                    if let Some(val) = dep_outputs.get(property) {
+                        payload.insert(name.clone(), val.clone());
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
-    // Check if there are any nodes with unresolved inputs that could potentially be resolved
-    pub fn has_unresolved_nodes(&self) -> bool {
-        for (_, fields) in self.0.iter() {
-            for (_, field) in fields.iter() {
-                if let MaybeResolved::Unresolved { .. } = field {
-                    return true;
-                }
-            }
-        }
+    payload
+}
 
-        false
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_graph_no_dependencies() {
+        let nodes = NodeParser::parse(
+            r#"
+                a module_a { x <- 1 }
+                b module_b { y <- 2 }
+                c module_c { z <- 3 }
+            "#,
+        )
+        .unwrap();
+
+        let (graph, _) = build_dependency_graph(&nodes);
+        let levels = compute_execution_levels(&graph);
+
+        assert_eq!(levels.len(), 1, "all independent nodes should be at level 0");
+        assert_eq!(levels[0].len(), 3);
     }
-}
 
-#[derive(Debug)]
-pub enum MaybeResolved {
-    Resolved {
-        direction: Direction,
-        value: SharedValue,
-    },
-    Unresolved {
-        identifier: Identifier,
-        property: String,
-        direction: Direction,
-    },
-}
+    #[test]
+    fn test_build_graph_linear_chain() {
+        let nodes = NodeParser::parse(
+            r#"
+                a module_a { x <- 1 }
+                b module_b { y <- a::x }
+                c module_c { z <- b::y }
+            "#,
+        )
+        .unwrap();
 
-pub fn setup(
-    mut commands: Commands,
-    mut inputs: ResMut<InputsMap>,
-    registry: Res<NodeRegistry>,
-    query: Query<(Entity, &Module), Without<Done>>,
-) {
-    for (entity, module) in query {
-        if inputs.is_ready(&module.identifier) {
-            if let Some(payload) = inputs.all_inputs(&module.identifier) {
-                let instance = registry.create(&module.name, payload).unwrap();
-                instance.run();
-                commands.entity(entity).insert(Done);
-                for (attribute, value) in instance.take_outputs() {
-                    inputs.replace_outputs(module.identifier.clone(), attribute, value);
+        let (graph, index_map) = build_dependency_graph(&nodes);
+        let levels = compute_execution_levels(&graph);
+
+        assert_eq!(levels.len(), 3, "linear chain should have 3 levels");
+        assert_eq!(levels[0].len(), 1);
+        assert_eq!(levels[1].len(), 1);
+        assert_eq!(levels[2].len(), 1);
+
+        let a_level = levels.iter().position(|l| l.contains(&index_map[&String::from("a")])).unwrap();
+        let b_level = levels.iter().position(|l| l.contains(&index_map[&String::from("b")])).unwrap();
+        let c_level = levels.iter().position(|l| l.contains(&index_map[&String::from("c")])).unwrap();
+        assert!(a_level < b_level);
+        assert!(b_level < c_level);
+    }
+
+    #[test]
+    fn test_build_graph_diamond() {
+        let nodes = NodeParser::parse(
+            r#"
+                source module_s { x <- 1 }
+                left module_l { y <- source::x }
+                right module_r { z <- source::x }
+                sink module_k { w <- left::y }
+            "#,
+        )
+        .unwrap();
+
+        let (graph, index_map) = build_dependency_graph(&nodes);
+        let levels = compute_execution_levels(&graph);
+
+        let source_level = levels.iter().position(|l| l.contains(&index_map[&String::from("source")])).unwrap();
+        let left_level = levels.iter().position(|l| l.contains(&index_map[&String::from("left")])).unwrap();
+        let right_level = levels.iter().position(|l| l.contains(&index_map[&String::from("right")])).unwrap();
+        let sink_level = levels.iter().position(|l| l.contains(&index_map[&String::from("sink")])).unwrap();
+
+        assert_eq!(source_level, 0);
+        assert_eq!(left_level, right_level, "left and right should be at the same level");
+        assert!(sink_level > left_level);
+    }
+
+    #[test]
+    fn test_resolve_literal_inputs() {
+        let nodes = NodeParser::parse(
+            r#"
+                a module_a {
+                    s <- "hello"
+                    n <- 42
+                    b <- true
                 }
-            }
-        }
+            "#,
+        )
+        .unwrap();
+
+        let instruct = &nodes[&String::from("a")];
+        let outputs = HashMap::new();
+        let payload = resolve_inputs(instruct, &outputs);
+
+        assert_eq!(payload.len(), 3);
+        assert_eq!(
+            *payload["s"].downcast_ref::<String>().unwrap(),
+            "hello"
+        );
+        assert_eq!(*payload["n"].downcast_ref::<u32>().unwrap(), 42);
+        assert_eq!(*payload["b"].downcast_ref::<bool>().unwrap(), true);
     }
 }

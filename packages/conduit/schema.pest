@@ -23,7 +23,7 @@ number = @{
 boolean = { "true" | "false" }
 relation = { identifier ~ "::" ~ property }
 
-value = { numeric | string | boolean | node | anonymous_node | relation | identifier }
+value = { string | boolean | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier }
 
 expression = { numeric ~ (operation ~ numeric)* }
 numeric = _{ number | module | "(" ~ expression ~ ")" }

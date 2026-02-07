@@ -1,4 +1,3 @@
-use bevy_ecs::prelude::Component;
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -9,7 +8,7 @@ pub type Settings = HashMap<String, Box<dyn Any + Send + Sync + 'static>>;
 
 pub type SharedValue = Arc<dyn Any + Send + Sync + 'static>;
 
-#[derive(Component, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum InputsType {
     Input(Option<SharedValue>),
     Output(Option<SharedValue>),
