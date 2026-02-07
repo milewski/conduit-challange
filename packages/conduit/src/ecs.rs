@@ -1,7 +1,9 @@
-use crate::dsl::parser::{Direction, Expression, Operation, Identifier, NodeInstruct, NodeParser, Value, PIPELINE_RESULT_ID};
+use crate::dsl::parser::{
+    Direction, Expression, Identifier, NodeInstruct, NodeParser, Operation, PIPELINE_RESULT_ID, Value,
+};
+use crate::node::FromSharedValue;
 use crate::node::SharedValue;
 use crate::registry::{NodeRegistry, Payload};
-use crate::node::FromSharedValue;
 use petgraph::Direction as GraphDirection;
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{BTreeMap, HashMap};
@@ -118,10 +120,14 @@ impl Engine {
             if let Some(value) = resolved.into_values().next() {
                 T::from_shared_value(&value)
             } else {
-                Err(crate::node::NodeError::Custom("Pipeline result not resolved".to_string()))
+                Err(crate::node::NodeError::Custom(
+                    "Pipeline result not resolved".to_string(),
+                ))
             }
         } else {
-            Err(crate::node::NodeError::Custom("No pipeline result defined (no `<- value` statement)".to_string()))
+            Err(crate::node::NodeError::Custom(
+                "No pipeline result defined (no `<- value` statement)".to_string(),
+            ))
         }
     }
 }

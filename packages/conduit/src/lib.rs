@@ -9,7 +9,7 @@ pub mod registry;
 pub mod traits;
 
 pub use crate::ecs::Engine;
-pub use crate::node::{SharedValue, FromSharedValue};
+pub use crate::node::{FromSharedValue, SharedValue};
 
 // Opaque type to represent the Engine in C
 pub struct ConduitEngine(Engine);
