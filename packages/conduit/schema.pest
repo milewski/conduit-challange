@@ -1,10 +1,10 @@
-nodes = { SOI ~ line_break* ~ ((anonymous_node | node) ~ line_break*)* ~ EOI }
+nodes = { SOI ~ NEWLINE* ~ ((anonymous_node | node) ~ NEWLINE*)* ~ EOI }
 node = { identifier ~ module ~ (shorthand | body) }
 anonymous_node = { module ~ (shorthand | body) }
 
 shorthand = { direction ~ value }
 
-body = { "{" ~ line_break* ~ (parameter ~ line_break*)* ~ "}" }
+body = { "{" ~ NEWLINE* ~ (parameter ~ NEWLINE*)* ~ "}" }
 parameter = { property ~ direction ~ value }
 
 string = { "\"" ~ inner_string ~ "\"" }
@@ -42,5 +42,4 @@ identifier = @{ (ASCII_ALPHA | "_")+ }
 module = ${ identifier ~ ("::" ~ property)? }
 property = @{ (ASCII_ALPHA | ASCII_DIGIT | "_")+ }
 
-line_break = _{ "\n" | "\r\n" | "\r" }
 WHITESPACE = _{ " " | "\t" }
