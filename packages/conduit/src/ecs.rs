@@ -1,8 +1,8 @@
 use crate::dsl::parser::{Direction, Expr, ExprOp, Identifier, NodeInstruct, NodeParser, Value};
 use crate::node::SharedValue;
 use crate::registry::{NodeRegistry, Payload};
-use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::Direction as GraphDirection;
+use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -26,19 +26,35 @@ impl Engine {
         self.runtime.block_on(self.run_pipeline_async(workflow));
     }
 
+    pub fn validate_modules(&self, nodes: &BTreeMap<Identifier, NodeInstruct>) -> Result<(), String> {
+        for (_, instruct) in nodes {
+            let module_name = &instruct.module;
+            if module_name != "_" && !self.registry.has(module_name) {
+                return Err(format!("Unknown module '{}' in node '{}'", module_name, instruct.identifier));
+            }
+        }
+        Ok(())
+    }
+
     async fn run_pipeline_async(&self, workflow: &str) {
         let nodes = NodeParser::parse(workflow).unwrap();
+
+        // Validate that all modules are either registered or are ignored (_)
+        if let Err(e) = self.validate_modules(&nodes) {
+            panic!("{}", e);
+        }
 
         let (graph, _index_map) = build_dependency_graph(&nodes);
         let levels = compute_execution_levels(&graph);
 
         let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
 
-        // Pre-populate outputs from data-only nodes (unregistered modules).
+        // Pre-populate outputs from data-only nodes (ignored modules or unregistered for legacy support).
         // These act as constant/config holders whose literal inputs are
         // made available as outputs for expression references.
+        // Note: modules named "_" are explicitly treated as data-only holders.
         for (id, instruct) in &nodes {
-            if !self.registry.has(&instruct.module) {
+            if instruct.module == "_" || !self.registry.has(&instruct.module) {
                 outputs.insert(id.clone(), resolve_inputs(instruct, &outputs, &nodes));
             }
         }
@@ -51,8 +67,8 @@ impl Engine {
                 let id = &graph[idx];
                 let instruct = &nodes[id];
 
-                // Skip data-only nodes — already resolved above
-                if !self.registry.has(&instruct.module) {
+                // Skip data-only nodes (marked with _ or others pre-resolved) — already resolved above
+                if instruct.module == "_" || !self.registry.has(&instruct.module) {
                     continue;
                 }
 
@@ -72,10 +88,7 @@ impl Engine {
 
             for (handle, id) in handles.into_iter().zip(handle_ids) {
                 let node_outputs = handle.await.unwrap();
-                let output_map: HashMap<String, SharedValue> = node_outputs
-                    .into_iter()
-                    .map(|(k, v)| (k.to_string(), v))
-                    .collect();
+                let output_map: HashMap<String, SharedValue> = node_outputs.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
                 outputs.insert(id, output_map);
             }
         }
@@ -84,9 +97,7 @@ impl Engine {
 
 /// Build a directed dependency graph from parsed nodes.
 /// Edges point from dependency → dependent (data flow direction).
-fn build_dependency_graph(
-    nodes: &BTreeMap<Identifier, NodeInstruct>,
-) -> (DiGraph<Identifier, String>, HashMap<Identifier, NodeIndex>) {
+fn build_dependency_graph(nodes: &BTreeMap<Identifier, NodeInstruct>) -> (DiGraph<Identifier, String>, HashMap<Identifier, NodeIndex>) {
     let mut graph = DiGraph::new();
     let mut index_map = HashMap::new();
 
@@ -104,25 +115,19 @@ fn build_dependency_graph(
                     direction,
                 } => match direction {
                     Direction::Input => {
-                        if let (Some(&from), Some(&to)) =
-                            (index_map.get(dep_id), index_map.get(id))
-                        {
+                        if let (Some(&from), Some(&to)) = (index_map.get(dep_id), index_map.get(id)) {
                             graph.add_edge(from, to, property.clone());
                         }
                     }
                     Direction::Output => {
-                        if let (Some(&from), Some(&to)) =
-                            (index_map.get(id), index_map.get(dep_id))
-                        {
+                        if let (Some(&from), Some(&to)) = (index_map.get(id), index_map.get(dep_id)) {
                             graph.add_edge(from, to, prop.clone());
                         }
                     }
                 },
                 Value::Expression { value: expr, .. } => {
                     for (ref_id, _) in collect_expr_refs(expr) {
-                        if let (Some(&from), Some(&to)) =
-                            (index_map.get(ref_id), index_map.get(id))
-                        {
+                        if let (Some(&from), Some(&to)) = (index_map.get(ref_id), index_map.get(id)) {
                             graph.add_edge(from, to, prop.clone());
                         }
                     }
@@ -138,8 +143,7 @@ fn build_dependency_graph(
 /// Compute execution levels via topological sort.
 /// Nodes at the same level have no mutual dependencies and can run in parallel.
 fn compute_execution_levels(graph: &DiGraph<Identifier, String>) -> Vec<Vec<NodeIndex>> {
-    let topo = petgraph::algo::toposort(graph, None)
-        .expect("Cycle detected in dependency graph");
+    let topo = petgraph::algo::toposort(graph, None).expect("Cycle detected in dependency graph");
 
     let mut node_levels: HashMap<NodeIndex, usize> = HashMap::new();
 
@@ -177,23 +181,13 @@ fn resolve_inputs(
 
     for (name, value) in &instruct.inputs {
         match value {
-            Value::String {
-                value, direction, ..
-            } if *direction == Direction::Input => {
+            Value::String { value, direction, .. } if *direction == Direction::Input => {
                 payload.insert(name.clone(), Arc::new(value.clone()) as SharedValue);
             }
-            Value::Numeric {
-                value, direction, ..
-            } if *direction == Direction::Input => {
-                payload.insert(
-                    name.clone(),
-                    Arc::new(value.parse::<u32>().unwrap()) as SharedValue,
-                );
+            Value::Numeric { value, direction, .. } if *direction == Direction::Input => {
+                payload.insert(name.clone(), Arc::new(value.parse::<u32>().unwrap()) as SharedValue);
             }
-            Value::Expression {
-                value: expr,
-                direction,
-            } if *direction == Direction::Input => {
+            Value::Expression { value: expr, direction } if *direction == Direction::Input => {
                 let result = eval_expr(expr, outputs, nodes);
                 if result.fract() == 0.0 && result >= 0.0 && result <= u32::MAX as f64 {
                     payload.insert(name.clone(), Arc::new(result as u32) as SharedValue);
@@ -201,9 +195,7 @@ fn resolve_inputs(
                     payload.insert(name.clone(), Arc::new(result) as SharedValue);
                 }
             }
-            Value::Boolean {
-                value, direction, ..
-            } if *direction == Direction::Input => {
+            Value::Boolean { value, direction, .. } if *direction == Direction::Input => {
                 payload.insert(name.clone(), Arc::new(*value) as SharedValue);
             }
             Value::Relation {
@@ -239,11 +231,7 @@ fn collect_expr_refs(expr: &Expr) -> Vec<(&str, &str)> {
 
 /// Evaluate an expression tree, resolving node references from dependency outputs
 /// or falling back to literal values from parsed node instructions.
-fn eval_expr(
-    expr: &Expr,
-    outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
-    nodes: &BTreeMap<Identifier, NodeInstruct>,
-) -> f64 {
+fn eval_expr(expr: &Expr, outputs: &HashMap<Identifier, HashMap<String, SharedValue>>, nodes: &BTreeMap<Identifier, NodeInstruct>) -> f64 {
     match expr {
         Expr::Number(s) => s.parse::<f64>().unwrap(),
         Expr::Ref { identifier, property } => {
@@ -259,17 +247,11 @@ fn eval_expr(
                     return match value {
                         Value::Numeric { value, .. } => value.parse::<f64>().unwrap(),
                         Value::Expression { value: inner, .. } => eval_expr(inner, outputs, nodes),
-                        _ => panic!(
-                            "Expression reference '{}::{}' is not numeric",
-                            identifier, property
-                        ),
+                        _ => panic!("Expression reference '{}::{}' is not numeric", identifier, property),
                     };
                 }
             }
-            panic!(
-                "Cannot resolve '{}::{}' in expression",
-                identifier, property
-            );
+            panic!("Cannot resolve '{}::{}' in expression", identifier, property);
         }
         Expr::BinOp { op, left, right } => {
             let l = eval_expr(left, outputs, nodes);
@@ -392,20 +374,14 @@ mod tests {
         let payload = resolve_inputs(instruct, &outputs, &nodes);
 
         assert_eq!(payload.len(), 3);
-        assert_eq!(
-            *payload["s"].downcast_ref::<String>().unwrap(),
-            "hello"
-        );
+        assert_eq!(*payload["s"].downcast_ref::<String>().unwrap(), "hello");
         assert_eq!(*payload["n"].downcast_ref::<u32>().unwrap(), 42);
         assert_eq!(*payload["b"].downcast_ref::<bool>().unwrap(), true);
     }
 
     #[test]
     fn test_resolve_expression_literal_only() {
-        let nodes = NodeParser::parse(
-            r#"a module_a { x <- (10 + 20) }"#,
-        )
-        .unwrap();
+        let nodes = NodeParser::parse(r#"a module_a { x <- (10 + 20) }"#).unwrap();
 
         let instruct = &nodes[&String::from("a")];
         let outputs = HashMap::new();
@@ -479,5 +455,29 @@ mod tests {
 
         // 10 + 3 * 2 = 16 (respects operator precedence)
         assert_eq!(*payload["z"].downcast_ref::<u32>().unwrap(), 16);
+    }
+
+    #[test]
+    #[should_panic(expected = "Unknown module 'invalid'")]
+    fn test_invalid_module_panics() {
+        let engine = Engine::new();
+        let nodes = NodeParser::parse(r#"a invalid { x <- 1 }"#).unwrap();
+
+        // This should return Err, but we panic on error
+        if let Err(e) = engine.validate_modules(&nodes) {
+            panic!("{}", e);
+        }
+    }
+
+    #[test]
+    fn test_ignored_module_underscore() {
+        let nodes = NodeParser::parse(r#"config _ { multiplier <- 5 }"#).unwrap();
+
+        let instruct = &nodes[&String::from("config")];
+        let outputs = HashMap::new();
+        let payload = resolve_inputs(instruct, &outputs, &nodes);
+
+        // Should work without error, just returns the literal value
+        assert_eq!(*payload["multiplier"].downcast_ref::<u32>().unwrap(), 5);
     }
 }
