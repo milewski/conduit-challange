@@ -1,0 +1,54 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser ::\nparse(r#\"\n                a module_a { x <- 10 }\n                b module_b { y <- 20 }\n                c module_c { z <- (a::x * b::y + 1) }\n            \"#)"
+---
+Ok(
+    {
+        "a": NodeInstruct {
+            identifier: "a",
+            module: "module_a",
+            inputs: {
+                "x": Numeric {
+                    direction: Input,
+                    value: "10",
+                },
+            },
+        },
+        "b": NodeInstruct {
+            identifier: "b",
+            module: "module_b",
+            inputs: {
+                "y": Numeric {
+                    direction: Input,
+                    value: "20",
+                },
+            },
+        },
+        "c": NodeInstruct {
+            identifier: "c",
+            module: "module_c",
+            inputs: {
+                "z": Expression {
+                    direction: Input,
+                    value: BinaryOperation {
+                        operation: Add,
+                        left: BinaryOperation {
+                            operation: Multiply,
+                            left: Reference {
+                                identifier: "a",
+                                property: "x",
+                            },
+                            right: Reference {
+                                identifier: "b",
+                                property: "y",
+                            },
+                        },
+                        right: Number(
+                            "1",
+                        ),
+                    },
+                },
+            },
+        },
+    },
+)

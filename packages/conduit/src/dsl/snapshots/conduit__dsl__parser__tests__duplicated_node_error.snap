@@ -1,0 +1,9 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser ::\nparse(r#\"\n                name module_a {}\n                name module_b {}\n            \"#)"
+---
+Err(
+    DuplicatedNode {
+        identifier: "name",
+    },
+)

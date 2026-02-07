@@ -1,6 +1,7 @@
-use crate::dsl::parser::{Direction, Expr, ExprOp, Identifier, NodeInstruct, NodeParser, Value};
+use crate::dsl::parser::{Direction, Expression, Operation, Identifier, NodeInstruct, NodeParser, Value, PIPELINE_RESULT_ID};
 use crate::node::SharedValue;
 use crate::registry::{NodeRegistry, Payload};
+use crate::node::FromSharedValue;
 use petgraph::Direction as GraphDirection;
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{BTreeMap, HashMap};
@@ -22,8 +23,8 @@ impl Engine {
         }
     }
 
-    pub fn run_pipeline(&mut self, workflow: &str) {
-        self.runtime.block_on(self.run_pipeline_async(workflow));
+    pub fn run_pipeline_blocking<T: FromSharedValue>(&mut self, workflow: &str) -> Result<T, crate::node::NodeError> {
+        self.runtime.block_on(self.run_pipeline_async(workflow))
     }
 
     pub fn validate_modules(&self, nodes: &BTreeMap<Identifier, NodeInstruct>) -> Result<(), String> {
@@ -39,13 +40,15 @@ impl Engine {
         Ok(())
     }
 
-    async fn run_pipeline_async(&self, workflow: &str) {
+    pub async fn run_pipeline_async<T: FromSharedValue>(&self, workflow: &str) -> Result<T, crate::node::NodeError> {
         let nodes = NodeParser::parse(workflow).unwrap();
 
         // Validate that all modules are either registered or are ignored (_)
         if let Err(e) = self.validate_modules(&nodes) {
             panic!("{}", e);
         }
+
+        let has_result = nodes.contains_key(PIPELINE_RESULT_ID);
 
         let (graph, _index_map) = build_dependency_graph(&nodes);
         let levels = compute_execution_levels(&graph);
@@ -56,7 +59,12 @@ impl Engine {
         // These act as constant/config holders whose literal inputs are
         // made available as outputs for expression references.
         // Note: modules named "_" are explicitly treated as data-only holders.
+        // Skip the pipeline result node — it must be resolved after all execution.
         for (id, instruct) in &nodes {
+            if id == PIPELINE_RESULT_ID {
+                continue;
+            }
+
             if instruct.module == "_" || !self.registry.has(&instruct.module) {
                 outputs.insert(id.clone(), resolve_inputs(instruct, &outputs, &nodes));
             }
@@ -101,6 +109,19 @@ impl Engine {
 
                 outputs.insert(id, map);
             }
+        }
+
+        // Resolve and return the pipeline result if defined
+        if has_result {
+            let result_instruct = &nodes[PIPELINE_RESULT_ID];
+            let resolved = resolve_inputs(result_instruct, &outputs, &nodes);
+            if let Some(value) = resolved.into_values().next() {
+                T::from_shared_value(&value)
+            } else {
+                Err(crate::node::NodeError::Custom("Pipeline result not resolved".to_string()))
+            }
+        } else {
+            Err(crate::node::NodeError::Custom("No pipeline result defined (no `<- value` statement)".to_string()))
         }
     }
 }
@@ -200,7 +221,7 @@ fn resolve_inputs(
                 payload.insert(name.clone(), Arc::new(value.parse::<u32>().unwrap()) as SharedValue);
             }
             Value::Expression { value: expr, direction } if *direction == Direction::Input => {
-                let result = eval_expr(expr, outputs, nodes);
+                let result = evaluate_expression(expr, outputs, nodes);
                 if result >= 0.0 && result <= u32::MAX as f64 {
                     payload.insert(name.clone(), Arc::new(result as u32) as SharedValue);
                 } else {
@@ -229,11 +250,11 @@ fn resolve_inputs(
 }
 
 /// Collect all node references from an expression tree.
-fn collect_expr_refs(expr: &Expr) -> Vec<(&str, &str)> {
+fn collect_expr_refs(expr: &Expression) -> Vec<(&str, &str)> {
     match expr {
-        Expr::Number(_) => vec![],
-        Expr::Ref { identifier, property } => vec![(identifier.as_str(), property.as_str())],
-        Expr::BinOp { left, right, .. } => {
+        Expression::Number(_) => vec![],
+        Expression::Reference { identifier, property } => vec![(identifier.as_str(), property.as_str())],
+        Expression::BinaryOperation { left, right, .. } => {
             let mut refs = collect_expr_refs(left);
             refs.extend(collect_expr_refs(right));
             refs
@@ -243,18 +264,18 @@ fn collect_expr_refs(expr: &Expr) -> Vec<(&str, &str)> {
 
 /// Evaluate an expression tree, resolving node references from dependency outputs
 /// or falling back to literal values from parsed node instructions.
-fn eval_expr(
-    expr: &Expr,
+fn evaluate_expression(
+    expression: &Expression,
     outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
     nodes: &BTreeMap<Identifier, NodeInstruct>,
 ) -> f64 {
-    match expr {
-        Expr::Number(s) => s.parse::<f64>().unwrap(),
-        Expr::Ref { identifier, property } => {
+    match expression {
+        Expression::Number(value) => value.parse::<f64>().unwrap(),
+        Expression::Reference { identifier, property } => {
             // Try resolved outputs first (from executed nodes)
             if let Some(dep_outputs) = outputs.get(identifier) {
-                if let Some(val) = dep_outputs.get(property) {
-                    return shared_value_to_f64(val);
+                if let Some(value) = dep_outputs.get(property) {
+                    return shared_value_to_f64(value);
                 }
             }
             // Fall back to literal inputs from parsed node (data-only nodes)
@@ -262,37 +283,38 @@ fn eval_expr(
                 if let Some(value) = instruct.inputs.get(property) {
                     return match value {
                         Value::Numeric { value, .. } => value.parse::<f64>().unwrap(),
-                        Value::Expression { value: inner, .. } => eval_expr(inner, outputs, nodes),
+                        Value::Expression { value: inner, .. } => evaluate_expression(inner, outputs, nodes),
                         _ => panic!("Expression reference '{}::{}' is not numeric", identifier, property),
                     };
                 }
             }
             panic!("Cannot resolve '{}::{}' in expression", identifier, property);
         }
-        Expr::BinOp { op, left, right } => {
-            let l = eval_expr(left, outputs, nodes);
-            let r = eval_expr(right, outputs, nodes);
-            match op {
-                ExprOp::Add => l + r,
-                ExprOp::Subtract => l - r,
-                ExprOp::Multiply => l * r,
-                ExprOp::Divide => l / r,
-                ExprOp::Power => l.powf(r),
+        Expression::BinaryOperation { operation, left, right } => {
+            let left = evaluate_expression(left, outputs, nodes);
+            let right = evaluate_expression(right, outputs, nodes);
+
+            match operation {
+                Operation::Add => left + right,
+                Operation::Subtract => left - right,
+                Operation::Multiply => left * right,
+                Operation::Divide => left / right,
+                Operation::Power => left.powf(right),
             }
         }
     }
 }
 
-fn shared_value_to_f64(val: &SharedValue) -> f64 {
-    if let Some(v) = val.downcast_ref::<f64>() {
+fn shared_value_to_f64(value: &SharedValue) -> f64 {
+    if let Some(v) = value.downcast_ref::<f64>() {
         *v
-    } else if let Some(v) = val.downcast_ref::<u32>() {
+    } else if let Some(v) = value.downcast_ref::<u32>() {
         *v as f64
-    } else if let Some(v) = val.downcast_ref::<i32>() {
+    } else if let Some(v) = value.downcast_ref::<i32>() {
         *v as f64
-    } else if let Some(v) = val.downcast_ref::<i64>() {
+    } else if let Some(v) = value.downcast_ref::<i64>() {
         *v as f64
-    } else if let Some(v) = val.downcast_ref::<f32>() {
+    } else if let Some(v) = value.downcast_ref::<f32>() {
         *v as f64
     } else {
         panic!("Expression reference value is not a numeric type")
@@ -539,5 +561,56 @@ mod tests {
 
         // Should work without error, just returns the literal value
         assert_eq!(*payload["multiplier"].downcast_ref::<u32>().unwrap(), 5);
+    }
+
+    #[test]
+    fn test_pipeline_result_string() {
+        let mut engine = Engine::new();
+        let pipeline = r#"<- "hello world""#;
+        let result: String = engine.run_pipeline_blocking(pipeline).unwrap();
+        assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn test_pipeline_result_number() {
+        let mut engine = Engine::new();
+        let pipeline = r#"<- 42"#;
+        let result: u32 = engine.run_pipeline_blocking(pipeline).unwrap();
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn test_pipeline_result_boolean() {
+        let mut engine = Engine::new();
+        let pipeline = r#"<- true"#;
+        let result: bool = engine.run_pipeline_blocking(pipeline).unwrap();
+        assert_eq!(result, true);
+    }
+
+    #[test]
+    fn test_pipeline_result_node_reference() {
+        let mut engine = Engine::new();
+        let pipeline = r#"
+            config _ { output <- "from config" }
+            <- config
+        "#;
+        let result: String = engine.run_pipeline_blocking(pipeline).unwrap();
+        assert_eq!(result, "from config");
+    }
+
+    #[test]
+    fn test_pipeline_no_result() {
+        let mut engine = Engine::new();
+        let pipeline = r#"config _ { value <- 42 }"#;
+        let result: Result<String, _> = engine.run_pipeline_blocking(pipeline);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pipeline_result_type_mismatch() {
+        let mut engine = Engine::new();
+        let pipeline = r#"<- "hello""#;
+        let result: Result<u32, _> = engine.run_pipeline_blocking(pipeline);
+        assert!(result.is_err());
     }
 }

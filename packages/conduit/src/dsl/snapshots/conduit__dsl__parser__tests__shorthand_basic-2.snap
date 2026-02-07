@@ -1,0 +1,18 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser :: parse(r#\"name module_a <- \"hello\"\"#)"
+---
+Ok(
+    {
+        "name": NodeInstruct {
+            identifier: "name",
+            module: "module_a",
+            inputs: {
+                "input": String {
+                    direction: Input,
+                    value: "hello",
+                },
+            },
+        },
+    },
+)

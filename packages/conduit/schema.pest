@@ -1,4 +1,5 @@
-nodes = { SOI ~ NEWLINE* ~ ((anonymous_node | node) ~ NEWLINE*)* ~ EOI }
+nodes = { SOI ~ NEWLINE* ~ ((pipeline_result | anonymous_node | node) ~ NEWLINE*)* ~ EOI }
+pipeline_result = { "<-" ~ value }
 node = { identifier ~ module ~ (shorthand | body) }
 anonymous_node = { module ~ (shorthand | body) }
 

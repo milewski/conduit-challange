@@ -11,7 +11,7 @@ fn main() {
 
         metadata metadata <- source read_file <- "./examples/conduit-example/cover.png"
 
-        resizer {
+        <- resizer {
             source <- source
             width <- (metadata::width / 2)
             height <- (metadata::height / 2)
@@ -22,5 +22,9 @@ fn main() {
     "#;
 
     let mut engine = Engine::new();
-    engine.run_pipeline(pipeline);
+
+    match engine.run_pipeline_blocking::<Vec<u8>>(pipeline) {
+        Ok(data) => println!("Pipeline result: {} bytes", data.len()),
+        Err(e) => println!("Pipeline error: {}", e),
+    }
 }

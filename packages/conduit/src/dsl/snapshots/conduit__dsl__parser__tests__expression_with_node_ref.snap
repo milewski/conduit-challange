@@ -1,0 +1,37 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser ::\nparse(r#\"\n                config constants { multiplier <- 4 }\n                name module { width <- (32 * config::multiplier) }\n            \"#)"
+---
+Ok(
+    {
+        "config": NodeInstruct {
+            identifier: "config",
+            module: "constants",
+            inputs: {
+                "multiplier": Numeric {
+                    direction: Input,
+                    value: "4",
+                },
+            },
+        },
+        "name": NodeInstruct {
+            identifier: "name",
+            module: "module",
+            inputs: {
+                "width": Expression {
+                    direction: Input,
+                    value: BinaryOperation {
+                        operation: Multiply,
+                        left: Number(
+                            "32",
+                        ),
+                        right: Reference {
+                            identifier: "config",
+                            property: "multiplier",
+                        },
+                    },
+                },
+            },
+        },
+    },
+)

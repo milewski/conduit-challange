@@ -9,6 +9,7 @@ pub mod registry;
 pub mod traits;
 
 pub use crate::ecs::Engine;
+pub use crate::node::{SharedValue, FromSharedValue};
 
 // Opaque type to represent the Engine in C
 pub struct ConduitEngine(Engine);
@@ -43,7 +44,7 @@ pub extern "C" fn conduit_run_pipeline(engine: *mut ConduitEngine, pipeline: *co
         Err(_) => return false,
     };
 
-    engine.0.run_pipeline(pipeline_str);
+    let _: Result<(), _> = engine.0.run_pipeline_blocking(pipeline_str);
     true
 }
 

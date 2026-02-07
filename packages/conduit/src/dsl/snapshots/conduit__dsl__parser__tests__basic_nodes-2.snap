@@ -1,0 +1,13 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser :: parse(\"anonymous_module {}\")"
+---
+Ok(
+    {
+        "[UUID]": NodeInstruct {
+            identifier: "[UUID]",
+            module: "anonymous_module",
+            inputs: {},
+        },
+    },
+)

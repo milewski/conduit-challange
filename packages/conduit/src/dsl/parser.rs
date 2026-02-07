@@ -8,21 +8,21 @@ use std::ops::Index;
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
-pub enum Expr {
+pub enum Expression {
     Number(String),
-    Ref {
+    Reference {
         identifier: String,
         property: String,
     },
-    BinOp {
-        op: ExprOp,
-        left: Box<Expr>,
-        right: Box<Expr>,
+    BinaryOperation {
+        operation: Operation,
+        left: Box<Expression>,
+        right: Box<Expression>,
     },
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
-pub enum ExprOp {
+pub enum Operation {
     Add,
     Subtract,
     Multiply,
@@ -46,7 +46,7 @@ pub enum Value {
     },
     Expression {
         direction: Direction,
-        value: Expr,
+        value: Expression,
     },
     Relation {
         identifier: Identifier,
@@ -222,6 +222,21 @@ impl Visitor {
         Ok(())
     }
 
+    pub fn visit_pipeline_result(&mut self, pair: Pair<Rule>) -> Result<(), ParserError> {
+        assert_eq!(pair.as_rule(), Rule::pipeline_result);
+
+        let value_pair = pair.into_inner().next().unwrap_or_else(|| unreachable!());
+        let inner = value_pair.into_inner().next().unwrap_or_else(|| unreachable!());
+        let direction = Direction::Input;
+        let value = self.visit_value(inner, direction)?;
+
+        let mut node = NodeInstruct::new(Some(PIPELINE_RESULT_ID), "_");
+        node.inputs.insert("input".to_string(), value);
+        self.nodes.insert(PIPELINE_RESULT_ID.to_string(), node);
+
+        Ok(())
+    }
+
     fn visit_value(&mut self, pair: Pair<Rule>, direction: Direction) -> Result<Value, ParserError> {
         match pair.as_rule() {
             Rule::expression => Ok(Value::Expression {
@@ -281,21 +296,21 @@ impl Visitor {
         }
     }
 
-    pub fn visit_expression(&self, expression: Pairs<Rule>) -> Result<Expr, ParserError> {
+    pub fn visit_expression(&self, expression: Pairs<Rule>) -> Result<Expression, ParserError> {
         let pratt = PrattParser::new()
             .op(Op::infix(Rule::add, Assoc::Left) | Op::infix(Rule::subtract, Assoc::Left))
             .op(Op::infix(Rule::multiply, Assoc::Left) | Op::infix(Rule::divide, Assoc::Left))
             .op(Op::infix(Rule::power, Assoc::Right));
 
         pratt
-            .map_primary(|primary| -> Result<Expr, ParserError> {
+            .map_primary(|primary| -> Result<Expression, ParserError> {
                 match primary.as_rule() {
-                    Rule::number => Ok(Expr::Number(primary.as_str().to_string())),
+                    Rule::number => Ok(Expression::Number(primary.as_str().to_string())),
                     Rule::relation => {
                         let mut pairs = primary.into_inner();
                         let identifier = pairs.next().unwrap().as_str().to_string();
                         let property = pairs.next().unwrap().as_str().to_string();
-                        Ok(Expr::Ref { identifier, property })
+                        Ok(Expression::Reference { identifier, property })
                     }
                     Rule::expression => self.visit_expression(primary.into_inner()),
                     rule => unreachable!("unexpected primary rule: {:?}", rule),
@@ -304,15 +319,15 @@ impl Visitor {
             .map_infix(|lhs, op, rhs| {
                 let (lhs, rhs) = (lhs?, rhs?);
                 let op = match op.as_rule() {
-                    Rule::add => ExprOp::Add,
-                    Rule::subtract => ExprOp::Subtract,
-                    Rule::multiply => ExprOp::Multiply,
-                    Rule::divide => ExprOp::Divide,
-                    Rule::power => ExprOp::Power,
+                    Rule::add => Operation::Add,
+                    Rule::subtract => Operation::Subtract,
+                    Rule::multiply => Operation::Multiply,
+                    Rule::divide => Operation::Divide,
+                    Rule::power => Operation::Power,
                     _ => unreachable!(),
                 };
-                Ok(Expr::BinOp {
-                    op,
+                Ok(Expression::BinaryOperation {
+                    operation: op,
                     left: Box::new(lhs),
                     right: Box::new(rhs),
                 })
@@ -363,6 +378,8 @@ impl Visitor {
     }
 }
 
+pub const PIPELINE_RESULT_ID: &str = "__pipeline_result__";
+
 #[derive(Debug)]
 pub struct NodeParser<'a> {
     visitor: Visitor,
@@ -385,6 +402,9 @@ impl<'a> NodeParser<'a> {
                 match pair.as_rule() {
                     Rule::node | Rule::anonymous_node => {
                         self.visitor.visit_node(pair)?;
+                    }
+                    Rule::pipeline_result => {
+                        self.visitor.visit_pipeline_result(pair)?;
                     }
                     Rule::EOI => continue,
                     _ => unreachable!(),
