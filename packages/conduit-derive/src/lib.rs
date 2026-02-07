@@ -1,38 +1,142 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, FieldsNamed, Ident, parse_macro_input};
+use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
-/// Derive macro for automatically implementing the Descriptor trait, From<Payload> trait,
-/// and registering the node with the NodeRegistry
-#[proc_macro_derive(Node)]
-pub fn derive_node(input: TokenStream) -> TokenStream {
-    // Parse the input tokens into a syntax tree
+/// Derive macro for `NodeInput` — generates `from_payload` that reads each
+/// struct field from the `Payload` HashMap by name.
+#[proc_macro_derive(NodeInput)]
+pub fn derive_node_input(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
 
-    // Extract the fields from the struct
     let fields = match &input.data {
         Data::Struct(data) => match &data.fields {
             Fields::Named(fields) => fields,
-            _ => panic!("Node derive only works on structs with named fields"),
+            _ => panic!("NodeInput derive only works on structs with named fields"),
         },
-        _ => panic!("Node derive only works on structs"),
+        _ => panic!("NodeInput derive only works on structs"),
     };
 
-    // Generate implementations
-    let descriptor_impl = generate_descriptor_impl(name, fields);
-    let from_payload_impl = generate_from_payload_impl(name, fields);
+    let field_extractors = fields.named.iter().map(|field| {
+        let field_name = field.ident.as_ref().unwrap();
+        let field_name_str = field_name.to_string();
+        let ty = &field.ty;
 
-    // Generate registration code
+        quote! {
+            #field_name: payload
+                .get(#field_name_str)
+                .and_then(|v| v.downcast_ref::<#ty>())
+                .cloned()
+                .ok_or(conduit::node::NodeError::MissingInput(#field_name_str))?
+        }
+    });
+
+    let field_names = fields.named.iter().map(|field| {
+        let field_name_str = field.ident.as_ref().unwrap().to_string();
+        quote! { #field_name_str }
+    });
+
+    let expanded = quote! {
+        impl conduit::traits::NodeInput for #name {
+            fn from_payload(payload: &conduit::registry::Payload) -> Result<Self, conduit::node::NodeError> {
+                Ok(Self {
+                    #(#field_extractors),*
+                })
+            }
+
+            fn field_names() -> Vec<&'static str> {
+                vec![#(#field_names),*]
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// Derive macro for `NodeOutput` — generates `into_outputs` that converts
+/// each struct field into a `(name, SharedValue)` pair.
+#[proc_macro_derive(NodeOutput)]
+pub fn derive_node_output(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+
+    let fields = match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(fields) => fields,
+            _ => panic!("NodeOutput derive only works on structs with named fields"),
+        },
+        _ => panic!("NodeOutput derive only works on structs"),
+    };
+
+    let output_entries = fields.named.iter().map(|field| {
+        let field_name = field.ident.as_ref().unwrap();
+        let field_name_str = field_name.to_string();
+        quote! {
+            (#field_name_str, std::sync::Arc::new(self.#field_name) as conduit::node::SharedValue)
+        }
+    });
+
+    let field_names = fields.named.iter().map(|field| {
+        let field_name_str = field.ident.as_ref().unwrap().to_string();
+        quote! { #field_name_str }
+    });
+
+    let expanded = quote! {
+        impl conduit::traits::NodeOutput for #name {
+            fn into_outputs(self) -> Vec<(&'static str, conduit::node::SharedValue)> {
+                vec![#(#output_entries),*]
+            }
+
+            fn field_names() -> Vec<&'static str> {
+                vec![#(#field_names),*]
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// Derive macro for `Node` — generates the `DynNode` bridge implementation
+/// and inventory-based registration. The struct should be empty (unit-like or
+/// with no meaningful fields); the actual input/output shape is defined by the
+/// `ExecutableNode` trait impl.
+#[proc_macro_derive(Node)]
+pub fn derive_node(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
     let name_str = name.to_string();
+    let struct_name_lowercase = name.to_string().to_lowercase();
+
+    let dyn_node_impl = quote! {
+        #[async_trait::async_trait]
+        impl conduit::traits::DynNode for #name {
+            fn name(&self) -> &'static str {
+                #struct_name_lowercase
+            }
+
+            async fn run_with_payload(
+                &self,
+                payload: conduit::registry::Payload,
+            ) -> Result<Vec<(&'static str, conduit::node::SharedValue)>, conduit::node::NodeError> {
+                let input = <<Self as conduit::traits::ExecutableNode>::Input as conduit::traits::NodeInput>::from_payload(&payload)?;
+                let output = <Self as conduit::traits::ExecutableNode>::run(self, input).await?;
+                Ok(<<Self as conduit::traits::ExecutableNode>::Output as conduit::traits::NodeOutput>::into_outputs(output))
+            }
+
+            fn input_fields(&self) -> Vec<&'static str> {
+                <<Self as conduit::traits::ExecutableNode>::Input as conduit::traits::NodeInput>::field_names()
+            }
+
+            fn output_fields(&self) -> Vec<&'static str> {
+                <<Self as conduit::traits::ExecutableNode>::Output as conduit::traits::NodeOutput>::field_names()
+            }
+        }
+    };
+
     let registration_impl = quote! {
-        // Implement the RegisterableNode trait for this node type
         impl conduit::registry::RegisterableNode for #name {
             fn register_type(registry: &mut conduit::registry::NodeRegistry) {
-                // Convert struct name to lowercase for registration
                 let node_name = stringify!(#name).to_string();
-
-                // Use as_str() to convert String to &str
                 registry.register::<#name>(node_name.as_str());
             }
 
@@ -41,108 +145,15 @@ pub fn derive_node(input: TokenStream) -> TokenStream {
             }
         }
 
-        // Add this node to the inventory
         inventory::submit! {
             conduit::registry::NodeRegistration::new::<#name>()
         }
     };
 
-    // Combine the implementations
     let expanded = quote! {
-        #descriptor_impl
-
-        #from_payload_impl
-
+        #dyn_node_impl
         #registration_impl
     };
 
     TokenStream::from(expanded)
-}
-
-fn generate_descriptor_impl(name: &Ident, fields: &FieldsNamed) -> proc_macro2::TokenStream {
-    let field_types = fields.named.iter().map(|field| {
-        let field_name = field.ident.as_ref().unwrap();
-        let field_name_str = field_name.to_string();
-
-        // Check if the field is an Input or Output based on its type
-        let ty = &field.ty;
-        let type_str = quote!(#ty).to_string();
-
-        if type_str.contains("Input") {
-            quote! { conduit::traits::FieldType::Input(#field_name_str) }
-        } else if type_str.contains("Output") {
-            quote! { conduit::traits::FieldType::Output(#field_name_str) }
-        } else {
-            panic!("Field {} must be either Input<T> or Output<T>", field_name_str);
-        }
-    });
-
-    let output_fields = fields.named.iter().filter_map(|field| {
-        let field_name = field.ident.as_ref().unwrap();
-        let field_name_str = field_name.to_string();
-        let ty = &field.ty;
-        let type_str = quote!(#ty).to_string();
-
-        if type_str.contains("Output") {
-            Some(quote! {
-                (#field_name_str, self.#field_name.into_shared_value())
-            })
-        } else {
-            None
-        }
-    });
-
-    // Convert struct name to lowercase for the node name
-    let struct_name_lowercase = name.to_string().to_lowercase();
-
-    quote! {
-        impl conduit::traits::Descriptor for #name {
-            fn name(&self) -> &'static str {
-                #struct_name_lowercase
-            }
-
-            fn fields(&self) -> Vec<conduit::traits::FieldType> {
-                vec![
-                    #(#field_types),*
-                ]
-            }
-
-            fn take_outputs(self: Box<Self>) -> Vec<(&'static str, conduit::node::SharedValue)> {
-                vec![
-                    #(#output_fields),*
-                ]
-            }
-        }
-    }
-}
-
-fn generate_from_payload_impl(name: &Ident, fields: &FieldsNamed) -> proc_macro2::TokenStream {
-    let field_initializers = fields.named.iter().map(|field| {
-        let field_name = field.ident.as_ref().unwrap();
-        let field_name_str = field_name.to_string();
-        let ty = &field.ty;
-        let type_str = quote!(#ty).to_string();
-
-        if type_str.contains("Input") {
-            quote! {
-                #field_name: conduit::node::Input::new(value.get(#field_name_str).unwrap().to_owned())
-            }
-        } else if type_str.contains("Output") {
-            quote! {
-                #field_name: Default::default()
-            }
-        } else {
-            panic!("Field {} must be either Input<T> or Output<T>", field_name_str);
-        }
-    });
-
-    quote! {
-        impl From<conduit::registry::Payload> for #name {
-            fn from(value: conduit::registry::Payload) -> Self {
-                Self {
-                    #(#field_initializers),*
-                }
-            }
-        }
-    }
 }

@@ -3,15 +3,22 @@ use pest::Parser;
 use pest::iterators::{Pair, Pairs};
 use pest::pratt_parser::{Assoc, Op, PrattParser};
 use pest_derive::Parser;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::ops::Index;
 use uuid::Uuid;
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum Expr {
     Number(String),
-    Ref { identifier: String, property: String },
-    BinOp { op: ExprOp, left: Box<Expr>, right: Box<Expr> },
+    Ref {
+        identifier: String,
+        property: String,
+    },
+    BinOp {
+        op: ExprOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
@@ -124,7 +131,10 @@ struct Visitor {
 }
 
 impl Visitor {
-    pub fn visit_node<'a>(&'a mut self, node: Pair<'a, Rule>) -> Result<(&'a NodeInstruct, Option<Pair<'a, Rule>>), ParserError> {
+    pub fn visit_node<'a>(
+        &'a mut self,
+        node: Pair<'a, Rule>,
+    ) -> Result<(&'a NodeInstruct, Option<Pair<'a, Rule>>), ParserError> {
         let kind = node.as_rule();
         let mut pairs = node.into_inner();
 

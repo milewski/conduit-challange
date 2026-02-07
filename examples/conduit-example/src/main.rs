@@ -4,12 +4,21 @@ mod nodes;
 
 fn main() {
     let pipeline = r#"
-        resizer {
-            source <- read_file {
+        constants _ {
+            width <- 512
+            height <- 1024
+        }
+
+        metadata metadata {
+            input <- source read_file {
                 input <- "./examples/conduit-example/cover.png"
             }
-            width <- 512
-            height <- 215
+        }
+
+        resizer {
+            source <- source
+            width <- (metadata::width * 2)
+            height <- (metadata::height * 2)
             output -> write_file {
                 destination <- "./examples/conduit-example/cover.smaller.png"
             }

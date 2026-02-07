@@ -53,6 +53,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "async-trait"
+version = "0.1.89"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -175,6 +186,7 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 name = "conduit"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "heck",
  "insta",
  "inventory",
@@ -190,6 +202,7 @@ dependencies = [
 name = "conduit-derive"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "inventory",
  "proc-macro2",
  "quote",
@@ -200,6 +213,7 @@ dependencies = [
 name = "conduit-example"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "conduit",
  "conduit-derive",
  "image",

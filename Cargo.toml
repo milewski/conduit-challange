@@ -14,4 +14,5 @@ inventory = "0.3.20"
 petgraph = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 conduit = { path = "./packages/conduit" }
+async-trait = "0.1"
 conduit-derive = { path = "./packages/conduit-derive" }

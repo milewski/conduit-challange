@@ -1,18 +1,18 @@
-use conduit::node::{Input, Output};
+use async_trait::async_trait;
+use conduit::node::NodeError;
 use conduit::traits::ExecutableNode;
 use conduit_derive::Node;
 use std::fs;
 
-#[derive(Node)]
-pub struct ReadFile {
-    pub input: Input<String>,
-    pub output: Output<Vec<u8>>,
-}
+#[derive(Node, Default)]
+pub struct ReadFile;
 
+#[async_trait]
 impl ExecutableNode for ReadFile {
-    fn run(&self) {
-        if let Ok(data) = fs::read(self.input.read()) {
-            self.output.write(data)
-        }
+    type Input = String;
+    type Output = Vec<u8>;
+
+    async fn run(&self, input: Self::Input) -> Result<Self::Output, NodeError> {
+        fs::read(&input).map_err(NodeError::from)
     }
 }

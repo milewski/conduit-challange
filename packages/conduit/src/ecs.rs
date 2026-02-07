@@ -30,7 +30,10 @@ impl Engine {
         for (_, instruct) in nodes {
             let module_name = &instruct.module;
             if module_name != "_" && !self.registry.has(module_name) {
-                return Err(format!("Unknown module '{}' in node '{}'", module_name, instruct.identifier));
+                return Err(format!(
+                    "Unknown module '{}' in node '{}'",
+                    module_name, instruct.identifier
+                ));
             }
         }
         Ok(())
@@ -77,19 +80,26 @@ impl Engine {
                 let registry = self.registry.clone();
 
                 handle_ids.push(id.clone());
-                handles.push(tokio::task::spawn_blocking(move || {
+                handles.push(tokio::spawn(async move {
                     let instance = registry
-                        .create(&module_name, payload)
+                        .create(&module_name, Default::default())
                         .unwrap_or_else(|| panic!("Module '{}' not found in registry", module_name));
-                    instance.run();
-                    instance.take_outputs()
+
+                    instance
+                        .run_with_payload(payload)
+                        .await
+                        .unwrap_or_else(|error| panic!("Node execution failed: {}", error))
                 }));
             }
 
             for (handle, id) in handles.into_iter().zip(handle_ids) {
                 let node_outputs = handle.await.unwrap();
-                let output_map: HashMap<String, SharedValue> = node_outputs.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
-                outputs.insert(id, output_map);
+                let map: HashMap<String, SharedValue> = node_outputs
+                    .into_iter()
+                    .map(|(key, value)| (key.to_string(), value))
+                    .collect();
+
+                outputs.insert(id, map);
             }
         }
     }
@@ -97,7 +107,9 @@ impl Engine {
 
 /// Build a directed dependency graph from parsed nodes.
 /// Edges point from dependency → dependent (data flow direction).
-fn build_dependency_graph(nodes: &BTreeMap<Identifier, NodeInstruct>) -> (DiGraph<Identifier, String>, HashMap<Identifier, NodeIndex>) {
+fn build_dependency_graph(
+    nodes: &BTreeMap<Identifier, NodeInstruct>,
+) -> (DiGraph<Identifier, String>, HashMap<Identifier, NodeIndex>) {
     let mut graph = DiGraph::new();
     let mut index_map = HashMap::new();
 
@@ -231,7 +243,11 @@ fn collect_expr_refs(expr: &Expr) -> Vec<(&str, &str)> {
 
 /// Evaluate an expression tree, resolving node references from dependency outputs
 /// or falling back to literal values from parsed node instructions.
-fn eval_expr(expr: &Expr, outputs: &HashMap<Identifier, HashMap<String, SharedValue>>, nodes: &BTreeMap<Identifier, NodeInstruct>) -> f64 {
+fn eval_expr(
+    expr: &Expr,
+    outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
+    nodes: &BTreeMap<Identifier, NodeInstruct>,
+) -> f64 {
     match expr {
         Expr::Number(s) => s.parse::<f64>().unwrap(),
         Expr::Ref { identifier, property } => {
@@ -324,9 +340,18 @@ mod tests {
         assert_eq!(levels[1].len(), 1);
         assert_eq!(levels[2].len(), 1);
 
-        let a_level = levels.iter().position(|l| l.contains(&index_map[&String::from("a")])).unwrap();
-        let b_level = levels.iter().position(|l| l.contains(&index_map[&String::from("b")])).unwrap();
-        let c_level = levels.iter().position(|l| l.contains(&index_map[&String::from("c")])).unwrap();
+        let a_level = levels
+            .iter()
+            .position(|l| l.contains(&index_map[&String::from("a")]))
+            .unwrap();
+        let b_level = levels
+            .iter()
+            .position(|l| l.contains(&index_map[&String::from("b")]))
+            .unwrap();
+        let c_level = levels
+            .iter()
+            .position(|l| l.contains(&index_map[&String::from("c")]))
+            .unwrap();
         assert!(a_level < b_level);
         assert!(b_level < c_level);
     }
@@ -346,10 +371,22 @@ mod tests {
         let (graph, index_map) = build_dependency_graph(&nodes);
         let levels = compute_execution_levels(&graph);
 
-        let source_level = levels.iter().position(|l| l.contains(&index_map[&String::from("source")])).unwrap();
-        let left_level = levels.iter().position(|l| l.contains(&index_map[&String::from("left")])).unwrap();
-        let right_level = levels.iter().position(|l| l.contains(&index_map[&String::from("right")])).unwrap();
-        let sink_level = levels.iter().position(|l| l.contains(&index_map[&String::from("sink")])).unwrap();
+        let source_level = levels
+            .iter()
+            .position(|l| l.contains(&index_map[&String::from("source")]))
+            .unwrap();
+        let left_level = levels
+            .iter()
+            .position(|l| l.contains(&index_map[&String::from("left")]))
+            .unwrap();
+        let right_level = levels
+            .iter()
+            .position(|l| l.contains(&index_map[&String::from("right")]))
+            .unwrap();
+        let sink_level = levels
+            .iter()
+            .position(|l| l.contains(&index_map[&String::from("sink")]))
+            .unwrap();
 
         assert_eq!(source_level, 0);
         assert_eq!(left_level, right_level, "left and right should be at the same level");

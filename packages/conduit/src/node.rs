@@ -1,50 +1,43 @@
 use std::any::Any;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::Arc;
-
-pub type Settings = HashMap<String, Box<dyn Any + Send + Sync + 'static>>;
 
 pub type SharedValue = Arc<dyn Any + Send + Sync + 'static>;
 
-#[derive(Clone, Debug)]
-pub enum InputsType {
-    Input(Option<SharedValue>),
-    Output(Option<SharedValue>),
+#[derive(Debug, thiserror::Error)]
+pub enum NodeError {
+    #[error("missing input field: {0}")]
+    MissingInput(&'static str),
+
+    #[error("type mismatch for field '{field}': expected {expected}")]
+    TypeMismatch {
+        field: &'static str,
+        expected: &'static str,
+    },
+
+    #[error("{0}")]
+    Custom(String),
 }
 
-#[derive(Debug)]
-pub struct Input<T: 'static> {
-    inner: SharedValue,
-    value: PhantomData<T>,
-}
-
-impl<T> Input<T> {
-    pub fn new(inner: SharedValue) -> Self {
-        Self {
-            inner,
-            value: PhantomData::default(),
-        }
-    }
-
-    pub fn read(&self) -> &T {
-        self.inner.downcast_ref::<T>().unwrap()
+impl From<String> for NodeError {
+    fn from(s: String) -> Self {
+        NodeError::Custom(s)
     }
 }
 
-#[derive(Debug, Default)]
-pub struct Output<T: Send + Sync + 'static> {
-    inner: RefCell<T>,
-    value: PhantomData<T>,
+impl From<&str> for NodeError {
+    fn from(s: &str) -> Self {
+        NodeError::Custom(s.to_string())
+    }
 }
 
-impl<T: Sync + Send> Output<T> {
-    pub fn write(&self, value: T) {
-        self.inner.replace(value);
+impl From<Box<dyn std::error::Error + Send + Sync>> for NodeError {
+    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        NodeError::Custom(e.to_string())
     }
+}
 
-    pub fn into_shared_value(self) -> SharedValue {
-        Arc::new(self.inner.into_inner())
+impl From<std::io::Error> for NodeError {
+    fn from(e: std::io::Error) -> Self {
+        NodeError::Custom(e.to_string())
     }
 }

@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 image = "0.25.6"
+async-trait = { workspace = true }
 conduit = { workspace = true }
 conduit-derive = { workspace = true }
 inventory = { workspace = true }
