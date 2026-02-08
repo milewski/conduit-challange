@@ -182,14 +182,12 @@ mod tests {
             }
         }
 
-        let output: u32 = pipeline!(
-            r#"
+        let output: u32 = pipeline! {r#"
             <- async_checked_divide {
                 dividend <- 10
                 divisor <- 2
             }
-        "#
-        );
+        "#};
 
         assert_eq!(output, 5);
     }
