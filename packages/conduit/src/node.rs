@@ -8,15 +8,91 @@ pub trait FromSharedValue: Sized {
     fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError>;
 }
 
-impl<T: Clone + Any> FromSharedValue for T {
-    fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
-        value
-            .downcast_ref::<T>()
-            .cloned()
-            .ok_or_else(|| NodeError::TypeMismatch {
-                field: "result",
-                expected: type_name::<T>(),
-            })
+macro_rules! impl_from_shared_value_primitive {
+    ($($t:ty),*) => {
+        $(
+            impl FromSharedValue for $t {
+                fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
+                     value
+                        .downcast_ref::<$t>()
+                        .cloned()
+                        .ok_or_else(|| NodeError::TypeMismatch {
+                            field: "result",
+                            expected: type_name::<$t>(),
+                        })
+                }
+            }
+        )*
+    };
+}
+
+impl_from_shared_value_primitive!(String, bool, Vec<u8>);
+
+macro_rules! impl_from_shared_value_numeric {
+    ($($t:ty),*) => {
+        $(
+            impl FromSharedValue for $t {
+                fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
+                    if let Some(v) = value.downcast_ref::<i128>() {
+                        return <$t>::try_from(*v).map_err(|_| NodeError::TypeMismatch {
+                             field: "result",
+                             expected: concat!("castable from i128 to ", stringify!($t)),
+                        });
+                    }
+                    if let Some(v) = value.downcast_ref::<f64>() {
+                         return Ok(*v as $t);
+                    }
+                    // Legacy fallback
+                    if let Some(v) = value.downcast_ref::<u32>() {
+                        return Ok(*v as $t);
+                    }
+                    if let Some(v) = value.downcast_ref::<i32>() {
+                        return Ok(*v as $t);
+                    }
+                    
+                    Err(NodeError::TypeMismatch {
+                        field: "result",
+                        expected: concat!("numeric value for ", stringify!($t)),
+                    })
+                }
+            }
+        )*
+    };
+}
+
+impl_from_shared_value_numeric!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+
+macro_rules! impl_from_shared_value_float {
+    ($($t:ty),*) => {
+        $(
+            impl FromSharedValue for $t {
+                fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
+                    if let Some(v) = value.downcast_ref::<f64>() {
+                        return Ok(*v as $t);
+                    }
+                    if let Some(v) = value.downcast_ref::<i128>() {
+                        return Ok(*v as $t);
+                    }
+                    // Legacy fallback
+                    if let Some(v) = value.downcast_ref::<u32>() {
+                        return Ok(*v as $t);
+                    }
+                    
+                    Err(NodeError::TypeMismatch {
+                        field: "result",
+                        expected: concat!("numeric value for ", stringify!($t)),
+                    })
+                }
+            }
+        )*
+    };
+}
+
+impl_from_shared_value_float!(f32, f64);
+
+impl FromSharedValue for () {
+    fn from_shared_value(_: &SharedValue) -> Result<Self, NodeError> {
+        Ok(())
     }
 }
 
@@ -53,8 +129,38 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for NodeError {
     }
 }
 
-impl From<std::io::Error> for NodeError {
-    fn from(e: std::io::Error) -> Self {
-        NodeError::Custom(e.to_string())
+macro_rules! impl_from_shared_value_tuple {
+    ($($T:ident),+) => {
+        impl<$($T: FromSharedValue + Any),+> FromSharedValue for ($($T,)+) {
+            fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
+                if let Some(vec) = value.downcast_ref::<Vec<SharedValue>>() {
+                    let len = vec.len();
+                    let expected_len = count_idents!($($T)+);
+                    if len != expected_len {
+                         return Err(NodeError::Custom(format!("Expected tuple of size {}, got {}", expected_len, len)));
+                    }
+
+                    let mut iter = vec.iter();
+                    Ok(($(
+                        $T::from_shared_value(iter.next().unwrap())?,
+                    )+))
+                } else {
+                    Err(NodeError::TypeMismatch {
+                        field: "result",
+                        expected: "Vec<SharedValue> (Tuple)",
+                    })
+                }
+            }
+        }
     }
 }
+
+macro_rules! count_idents {
+    ($i:ident) => { 1 };
+    ($i:ident $($rest:ident)+) => { 1 + count_idents!($($rest)+) };
+}
+
+impl_from_shared_value_tuple!(A, B);
+impl_from_shared_value_tuple!(A, B, C);
+impl_from_shared_value_tuple!(A, B, C, D);
+impl_from_shared_value_tuple!(A, B, C, D, E);

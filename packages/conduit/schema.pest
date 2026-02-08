@@ -31,8 +31,9 @@ number = @{
 
 boolean = { "true" | "false" }
 relation = { identifier ~ "::" ~ property }
+tuple = { "(" ~ value ~ ("," ~ value)+ ~ ")" }
 
-value = { string | boolean | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier }
+value = { string | boolean | tuple | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier }
 
 expression = { numeric ~ (operation ~ numeric)* }
 numeric = _{ number | relation | identifier | "(" ~ expression ~ ")" }

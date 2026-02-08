@@ -59,6 +59,10 @@ pub enum Value {
         direction: Direction,
         property: String,
     },
+    Tuple {
+        direction: Direction,
+        values: Vec<Value>,
+    },
 }
 
 impl Value {
@@ -68,7 +72,8 @@ impl Value {
             | Value::Numeric { direction, .. }
             | Value::Boolean { direction, .. }
             | Value::Expression { direction, .. }
-            | Value::Relation { direction, .. } => *direction,
+            | Value::Relation { direction, .. }
+            | Value::Tuple { direction, .. } => *direction,
         }
     }
 }
@@ -274,6 +279,12 @@ impl Visitor {
     }
 
     fn visit_value(&mut self, pair: Pair<Rule>, direction: Direction) -> Result<Value, ParserError> {
+        let pair = if pair.as_rule() == Rule::value {
+            pair.into_inner().next().unwrap()
+        } else {
+            pair
+        };
+
         match pair.as_rule() {
             Rule::expression => Ok(Value::Expression {
                 direction,
@@ -350,6 +361,13 @@ impl Visitor {
                     identifier: identifier.as_str().to_string(),
                     property: related_property.as_str().to_string(),
                 })
+            }
+            Rule::tuple => {
+                let mut values = Vec::new();
+                for inner in pair.into_inner() {
+                    values.push(self.visit_value(inner, direction)?);
+                }
+                Ok(Value::Tuple { direction, values })
             }
             _ => unreachable!("{:#?}", pair),
         }
