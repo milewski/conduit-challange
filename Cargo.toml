@@ -12,7 +12,7 @@ pest_derive = { version = "2.7.15" }
 thiserror = "2.0.12"
 inventory = "0.3.20"
 petgraph = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 conduit = { path = "./packages/conduit" }
 async-trait = "0.1"
 conduit-derive = { path = "./packages/conduit-derive" }

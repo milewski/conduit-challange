@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::{input, pipeline};
+    use crate::{functional_node, input, pipeline};
 
     #[test]
     fn test_input_output() {
@@ -122,5 +122,73 @@ mod tests {
         assert_eq!(b, "b");
         assert_eq!(c, "c");
         assert_eq!(d, (2, 3));
+    }
+
+    #[test]
+    fn test_custom_module_can_be_processed() {
+        #[functional_node]
+        fn multiplier(a: u32, b: u32) -> u32 {
+            a * b
+        }
+
+        let output: u32 = pipeline! {r#"
+            <- multiplier {
+                a <- 2
+                b <- 2
+            }
+        "#};
+
+        assert_eq!(output, 4);
+    }
+
+    #[test]
+    fn test_nested_modules() {
+        #[functional_node]
+        async fn multiplier(a: u32, b: u32) -> u32 {
+            a * b
+        }
+
+        #[functional_node]
+        async fn subtract(a: u32, b: u32) -> u32 {
+            a - b
+        }
+
+        let output: u32 = pipeline! {r#"
+            <- multiplier {               # 4 * 2 = 8
+                a <- mul multiplier {     # 2 * 2 = 4
+                    a <- 2
+                    b <- 2
+                }
+                b <- sub subtract {       # 4 - 2 = 2
+                    a <- mul
+                    b <- 2
+                }
+            }
+        "#};
+
+        assert_eq!(output, 8);
+    }
+
+    #[test]
+    fn test_async_and_result_module() {
+        #[functional_node]
+        async fn async_checked_divide(dividend: u32, divisor: u32) -> Result<u32, String> {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+            if divisor == 0 {
+                Err("division by zero".to_string())
+            } else {
+                Ok(dividend / divisor)
+            }
+        }
+
+        let output: u32 = pipeline!(r#"
+            <- async_checked_divide {
+                dividend <- 10
+                divisor <- 2
+            }
+        "#);
+
+        assert_eq!(output, 5);
     }
 }

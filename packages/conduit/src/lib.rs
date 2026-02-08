@@ -11,6 +11,9 @@ mod test;
 
 pub use crate::ecs::Engine;
 pub use crate::node::{FromSharedValue, SharedValue};
+pub use conduit_derive::node as functional_node;
+
+extern crate self as conduit;
 
 // Opaque type to represent the Engine in C
 pub struct ConduitEngine(Engine);

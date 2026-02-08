@@ -1,9 +1,182 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, parse_macro_input};
+use syn::{Data, DeriveInput, Fields, ItemFn, parse_macro_input};
 
-/// Derive macro for `NodeInput` — generates `from_payload` that reads each
-/// struct field from the `Payload` HashMap by name.
+// ... existing derives ...
+
+fn extract_ok_type(ty: &syn::Type) -> Option<&syn::Type> {
+    if let syn::Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.last() {
+            if segment.ident == "Result" {
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if !args.args.is_empty() {
+                         if let syn::GenericArgument::Type(inner) = &args.args[0] {
+                             return Some(inner);
+                         }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[proc_macro_attribute]
+pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input_fn = parse_macro_input!(item as ItemFn);
+    let fn_name = &input_fn.sig.ident;
+    let struct_name = fn_name; // Keep same name (lowercase)
+    let struct_name_input = syn::Ident::new(&format!("{}Input", fn_name), fn_name.span());
+
+    let inputs: Vec<_> = input_fn.sig.inputs.iter().map(|arg| {
+        if let syn::FnArg::Typed(pat_type) = arg {
+            if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                let ident = &pat_ident.ident;
+                let ty = &pat_type.ty;
+                return quote! { #ident: #ty };
+            }
+        }
+        panic!("Unsupported argument type in node function");
+    }).collect();
+
+    let input_fields_extract = input_fn.sig.inputs.iter().map(|arg| {
+        if let syn::FnArg::Typed(pat_type) = arg {
+            if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                let ident = &pat_ident.ident;
+                let ident_str = ident.to_string();
+                let ty = &pat_type.ty;
+                return quote! {
+                    #ident: payload
+                        .get(#ident_str)
+                        .ok_or(conduit::node::NodeError::MissingInput(#ident_str))
+                        .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
+                };
+            }
+        }
+        panic!("Unsupported argument type");
+    });
+
+    let input_field_names = input_fn.sig.inputs.iter().map(|arg| {
+        if let syn::FnArg::Typed(pat_type) = arg {
+             if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                let ident_str = pat_ident.ident.to_string();
+                return quote! { #ident_str };
+             }
+        }
+        panic!("Unsupported argument type");
+    });
+
+    let args_destructure = input_fn.sig.inputs.iter().map(|arg| {
+        if let syn::FnArg::Typed(pat_type) = arg {
+            if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                let ident = &pat_ident.ident;
+                return quote! { input.#ident };
+            }
+        }
+        panic!("Unsupported");
+    });
+
+    let body = &input_fn.block;
+    
+    let (output_ty, is_result) = match &input_fn.sig.output {
+        syn::ReturnType::Default => (quote! { () }, false),
+        syn::ReturnType::Type(_, ty) => {
+            if let Some(ok_ty) = extract_ok_type(ty) {
+                (quote! { #ok_ty }, true)
+            } else {
+                (quote! { #ty }, false)
+            }
+        },
+    };
+
+    let run_impl = if is_result {
+        quote! {
+            func(#(#args_destructure),*).await.map_err(|error| conduit::node::NodeError::from(error.to_string()))
+        }
+    } else {
+        quote! {
+            Ok(func(#(#args_destructure),*).await)
+        }
+    };
+
+    let struct_name_str = struct_name.to_string();
+
+    let expanded = quote! {
+        #[allow(non_camel_case_types)]
+        #[derive(Default, Clone)]
+        struct #struct_name;
+
+        #[allow(non_camel_case_types)]
+        struct #struct_name_input {
+            #(#inputs),*
+        }
+
+        impl conduit::traits::NodeInput for #struct_name_input {
+            fn from_payload(payload: &conduit::registry::Payload) -> Result<Self, conduit::node::NodeError> {
+                Ok(Self {
+                    #(#input_fields_extract),*
+                })
+            }
+            fn field_names() -> Vec<&'static str> {
+                vec![#(#input_field_names),*]
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl conduit::traits::ExecutableNode for #struct_name {
+            type Input = #struct_name_input;
+            type Output = #output_ty;
+
+            async fn run(&self, input: Self::Input) -> Result<Self::Output, conduit::node::NodeError> {
+                let func = |#(#inputs),*| async move #body;
+                #run_impl
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl conduit::traits::DynNode for #struct_name {
+            fn name(&self) -> &'static str {
+                #struct_name_str
+            }
+
+            async fn run_with_payload(
+                &self,
+                payload: conduit::registry::Payload,
+            ) -> Result<Vec<(&'static str, conduit::node::SharedValue)>, conduit::node::NodeError> {
+                let input = <<Self as conduit::traits::ExecutableNode>::Input as conduit::traits::NodeInput>::from_payload(&payload)?;
+                let output = <Self as conduit::traits::ExecutableNode>::run(self, input).await?;
+                Ok(<<Self as conduit::traits::ExecutableNode>::Output as conduit::traits::NodeOutput>::into_outputs(output))
+            }
+
+            fn input_fields(&self) -> Vec<&'static str> {
+                <<Self as conduit::traits::ExecutableNode>::Input as conduit::traits::NodeInput>::field_names()
+            }
+
+            fn output_fields(&self) -> Vec<&'static str> {
+                <<Self as conduit::traits::ExecutableNode>::Output as conduit::traits::NodeOutput>::field_names()
+            }
+        }
+
+        impl conduit::registry::RegisterableNode for #struct_name {
+            fn register_type(registry: &mut conduit::registry::NodeRegistry) {
+                // Use the string literal name, not stringify! which might vary
+                registry.register::<#struct_name>(#struct_name_str);
+            }
+
+            fn type_name() -> &'static str {
+                #struct_name_str
+            }
+        }
+
+        inventory::submit! {
+            conduit::registry::NodeRegistration::new::<#struct_name>()
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+
 #[proc_macro_derive(NodeInput)]
 pub fn derive_node_input(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -25,9 +198,8 @@ pub fn derive_node_input(input: TokenStream) -> TokenStream {
         quote! {
             #field_name: payload
                 .get(#field_name_str)
-                .and_then(|v| v.downcast_ref::<#ty>())
-                .cloned()
-                .ok_or(conduit::node::NodeError::MissingInput(#field_name_str))?
+                .ok_or(conduit::node::NodeError::MissingInput(#field_name_str))
+                .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
         }
     });
 

@@ -19,3 +19,4 @@ async-trait = { workspace = true }
 heck = "0.5.0"
 insta = { version = "1.43.1", features = ["filters"] }
 num-traits = "0.2.19"
+conduit-derive = { workspace = true }
