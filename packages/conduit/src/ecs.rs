@@ -98,12 +98,39 @@ impl Engine {
         // made available as outputs for expression references.
         // Note: modules named "_" are explicitly treated as data-only holders.
         // Skip the pipeline result node — it must be resolved after all execution.
+        
+        // Phase 1: Resolve inputs first
+        for (id, instruct) in &nodes {
+            if instruct.module == "__input__" {
+                let payload = resolve_inputs(instruct, &outputs, &nodes, &input_names);
+                let default_value = payload.get("default").cloned();
+
+                // The original input name is extracted from the node name (removing __input_ prefix)
+                let name = id.strip_prefix("__input_").unwrap();
+                let value = if let Some(v) = runtime_inputs.get(name) {
+                    v.clone()
+                } else if let Some(v) = default_value {
+                    v
+                } else {
+                    panic!("Missing input '{}'", name);
+                };
+
+                let mut map = HashMap::new();
+                map.insert("output".to_string(), value);
+                outputs.insert(id.clone(), map);
+            }
+        }
+
+        // Phase 2: Resolve data-only nodes
         for (id, instruct) in &nodes {
             if id == PIPELINE_RESULT_ID {
                 continue;
             }
 
             if instruct.module == "_" || !self.registry.has(&instruct.module) {
+                // If it's an input, we already handled it
+                if instruct.module == "__input__" { continue; }
+                
                 outputs.insert(id.clone(), resolve_inputs(instruct, &outputs, &nodes, &input_names));
             }
         }
@@ -116,25 +143,8 @@ impl Engine {
                 let id = &graph[idx];
                 let instruct = &nodes[id];
 
+                // Skip inputs (already handled)
                 if instruct.module == "__input__" {
-                    let payload = resolve_inputs(instruct, &outputs, &nodes, &input_names);
-                    let default_value = payload.get("default").cloned();
-
-                    // The original input name is extracted from the node name (removing __input_ prefix)
-                    let name = id.strip_prefix("__input_").unwrap();
-                    let value = if let Some(v) = runtime_inputs.get(name) {
-                        v.clone()
-                    } else if let Some(v) = default_value {
-                        v
-                    } else {
-                        // If no default value and no runtime input, this is an error?
-                        // For now we panic as per other error handling in this file
-                        panic!("Missing input '{}'", name);
-                    };
-
-                    let mut map = HashMap::new();
-                    map.insert("output".to_string(), value);
-                    outputs.insert(id.clone(), map);
                     continue;
                 }
 

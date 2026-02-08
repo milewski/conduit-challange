@@ -7,6 +7,7 @@ pub mod ecs;
 pub mod node;
 pub mod registry;
 pub mod traits;
+mod test;
 
 pub use crate::ecs::Engine;
 pub use crate::node::{FromSharedValue, SharedValue};
@@ -57,11 +58,72 @@ fn to_c_string(s: &str) -> *mut c_char {
 }
 
 // Helper function to free a C string
-#[unsafe(no_mangle)]
-pub extern "C" fn conduit_free_string(s: *mut c_char) {
-    if !s.is_null() {
-        unsafe {
-            drop(CString::from_raw(s));
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pipeline_macro_simple() {
+        let output: String = pipeline! {
+            r#"
+            config _ { name <- "world" }
+            <- config::name
+        "#
+        };
+        assert_eq!(output, "world");
     }
+
+    #[test]
+    fn test_pipeline_macro_with_input() {
+        let input = input! { name: "example" };
+        let output: String = pipeline! {
+            input,
+            r#"
+            -> name
+            config _ { name <- name }
+            <- config::name
+        "#
+        };
+        assert_eq!(output, "example");
+    }
+}
+
+/// Macro to create a dynamic input object for the pipeline.
+///
+/// Usage:
+/// ```rust
+/// use conduit::input;
+/// let input = input! { name: "value", count: 42 };
+/// ```
+#[macro_export]
+macro_rules! input {
+    ( $($key:ident : $value:expr),* $(,)? ) => {
+        $crate::traits::DynamicInput(vec![
+            $( (stringify!($key), std::sync::Arc::new($crate::traits::AsInput::as_input($value)) as $crate::SharedValue) ),*
+        ])
+    };
+}
+
+/// Macro to run a pipeline inline.
+///
+/// Usage:
+/// ```rust,ignore
+/// use conduit::{pipeline, input};
+///
+/// // No input
+/// let output: String = pipeline! { r#"<- "hello""# };
+///
+/// // With input
+/// let input = input! { name: "world" };
+/// let output: String = pipeline! { input, r#"<- name"# };
+/// ```
+#[macro_export]
+macro_rules! pipeline {
+    ($pipeline:expr) => {
+        $crate::pipeline!((), $pipeline)
+    };
+    ($input:expr, $pipeline:expr) => {{
+        let mut engine = $crate::Engine::new();
+        engine.run_pipeline_blocking($pipeline, $input).unwrap()
+    }};
 }

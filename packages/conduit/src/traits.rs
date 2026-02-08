@@ -78,6 +78,56 @@ impl_node_output_single!(u32);
 impl_node_output_single!(bool);
 impl_node_output_single!(f64);
 
+// -- Dynamic Input Helper --
+
+pub struct DynamicInput(pub Vec<(&'static str, SharedValue)>);
+
+impl NodeOutput for DynamicInput {
+    fn into_outputs(self) -> Vec<(&'static str, SharedValue)> {
+        self.0
+    }
+    
+    fn field_names() -> Vec<&'static str> {
+        Vec::new() // Not used by engine currently
+    }
+}
+
+pub trait AsInput {
+    type Output: std::any::Any + Send + Sync;
+    fn as_input(self) -> Self::Output;
+}
+
+impl AsInput for String {
+    type Output = String;
+    fn as_input(self) -> String {
+        self
+    }
+}
+
+impl AsInput for &str {
+    type Output = String;
+    fn as_input(self) -> String {
+        self.to_string()
+    }
+}
+
+macro_rules! impl_as_input_identity {
+    ($t:ty) => {
+        impl AsInput for $t {
+            type Output = $t;
+            fn as_input(self) -> $t {
+                self
+            }
+        }
+    };
+}
+
+impl_as_input_identity!(u32);
+impl_as_input_identity!(i32);
+impl_as_input_identity!(f64);
+impl_as_input_identity!(bool);
+impl_as_input_identity!(Vec<u8>);
+
 // -- User-facing trait (not object-safe) --
 
 /// Trait that node authors implement. Associated types define input/output shape;
