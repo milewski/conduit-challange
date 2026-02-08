@@ -263,11 +263,11 @@ pub fn derive_node_input(input: TokenStream) -> TokenStream {
     let field_names = fields.named.iter().map(|field| {
         let field_name_str = field.ident.as_ref().unwrap().to_string();
         let has_input_attr = field.attrs.iter().any(|attr| attr.path().is_ident("input"));
-        
+
         if has_input_attr {
-             quote! { #field_name_str, "input" }
+            quote! { #field_name_str, "input" }
         } else {
-             quote! { #field_name_str }
+            quote! { #field_name_str }
         }
     });
 

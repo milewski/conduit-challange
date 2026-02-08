@@ -2,6 +2,16 @@
 mod tests {
     use crate::{functional_node, input, pipeline};
 
+    #[functional_node]
+    fn multiplier(#[input] a: u32, b: u32) -> u32 {
+        a * b
+    }
+
+    #[functional_node]
+    fn subtract(a: u32, b: u32) -> u32 {
+        a - b
+    }
+
     #[test]
     fn test_input_output() {
         let input = input! { name: "rafael" };
@@ -143,16 +153,6 @@ mod tests {
 
     #[test]
     fn test_nested_modules() {
-        #[functional_node]
-        fn multiplier(a: u32, b: u32) -> u32 {
-            a * b
-        }
-
-        #[functional_node]
-        fn subtract(a: u32, b: u32) -> u32 {
-            a - b
-        }
-
         let output: u32 = pipeline! {r#"
             <- multiplier {               # 4 * 2 = 8
                 a <- m multiplier {       # 2 * 2 = 4
@@ -199,11 +199,6 @@ mod tests {
         #[functional_node]
         async fn number() -> u32 {
             5
-        }
-
-        #[functional_node]
-        async fn multiplier(#[input] a: u32, b: u32) -> u32 {
-            a * b
         }
 
         let ((a, b), (c, d), (e, f), (g, h)): ((u32, u32), (u32, u32), (u32, u32), (u32, u32)) = pipeline! {r#"
@@ -270,7 +265,7 @@ mod tests {
         fn producer() -> u32 {
             10
         }
-        
+
         #[functional_node]
         fn consumer(#[input] value: u32) -> u32 {
             value * 2
@@ -280,7 +275,7 @@ mod tests {
             p producer { -> c consumer {} }
             <- c
         "#};
-        
+
         assert_eq!(output, 20);
     }
 }

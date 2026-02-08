@@ -220,7 +220,7 @@ impl Visitor {
             let mut pairs = pair.into_inner();
 
             let first = pairs.next().unwrap_or_else(|| unreachable!());
-            
+
             let (property_name, direction_pair, value_pair) = if first.as_rule() == Rule::property {
                 let direction = pairs.next().unwrap_or_else(|| unreachable!());
                 let value = pairs.next().unwrap_or_else(|| unreachable!());
@@ -228,14 +228,14 @@ impl Visitor {
             } else if first.as_rule() == Rule::direction {
                 let direction = first;
                 let value = pairs.next().unwrap_or_else(|| unreachable!());
-                
+
                 // We need to parse direction enum here to decide default property name
                 // Note: We can reuse the existing From implementation logic or check raw string
                 let dir_str = direction.as_str();
                 let prop_name = match dir_str {
-                     "<-" => "input".to_string(),
-                     "->" => "output".to_string(),
-                     _ => unreachable!(),
+                    "<-" => "input".to_string(),
+                    "->" => "output".to_string(),
+                    _ => unreachable!(),
                 };
                 (prop_name, direction, value)
             } else {
@@ -768,11 +768,6 @@ mod tests {
             "#,
         );
     }
-}
-
-#[cfg(test)]
-mod input_tests {
-    use super::*;
 
     #[test]
     fn test_pipeline_inputs() {

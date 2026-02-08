@@ -799,7 +799,7 @@ mod tests {
 
         assert_eq!(payload.len(), 3);
         assert_eq!(*payload["s"].downcast_ref::<String>().unwrap(), "hello");
-        assert_eq!(*payload["n"].downcast_ref::<u32>().unwrap(), 42);
+        assert_eq!(*payload["n"].downcast_ref::<i128>().unwrap(), 42);
         assert_eq!(*payload["b"].downcast_ref::<bool>().unwrap(), true);
     }
 
@@ -930,7 +930,7 @@ mod tests {
         let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
 
         // Should work without error, just returns the literal value
-        assert_eq!(*payload["multiplier"].downcast_ref::<u32>().unwrap(), 5);
+        assert_eq!(*payload["multiplier"].downcast_ref::<i128>().unwrap(), 5);
     }
 
     #[test]
