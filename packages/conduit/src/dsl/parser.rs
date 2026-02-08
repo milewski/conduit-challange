@@ -31,10 +31,16 @@ pub enum Operation {
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
+pub enum StringPart {
+    Literal(String),
+    Interpolation(Expression),
+}
+
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum Value {
     String {
         direction: Direction,
-        value: String,
+        parts: Vec<StringPart>,
     },
     Numeric {
         direction: Direction,
@@ -277,10 +283,33 @@ impl Visitor {
                 direction,
                 value: pair.as_str().to_string(),
             }),
-            Rule::string => Ok(Value::String {
-                direction,
-                value: pair.as_str().trim_matches('"').to_string(),
-            }),
+            Rule::string => {
+                let mut parts = Vec::new();
+                for inner in pair.into_inner() {
+                    match inner.as_rule() {
+                        Rule::string_content => {
+                            parts.push(StringPart::Literal(inner.as_str().to_string()));
+                        }
+                        Rule::interpolation => {
+                            let inner_pair = inner.into_inner().next().unwrap();
+                            let inner_str = inner_pair.as_str();
+                            
+                            let mut pairs = Schema::parse(Rule::interpolation_expression, inner_str)
+                                .map_err(|e| ParserError::from(e))?;
+                            
+                            let expression_pair = pairs.next().unwrap().into_inner().next().unwrap();
+                            let expression = self.visit_expression(expression_pair.into_inner())?;
+                            
+                            parts.push(StringPart::Interpolation(expression));
+                        }
+                        _ => unreachable!("Unexpected rule in string: {:?}", inner.as_rule()),
+                    }
+                }
+                Ok(Value::String {
+                    direction,
+                    parts,
+                })
+            }
             Rule::boolean => Ok(Value::Boolean {
                 direction,
                 value: match pair.as_str() {
@@ -639,6 +668,12 @@ mod tests {
                     output -> name_c module_c <- 42
                 }
             "#,
+        );
+    }
+    #[test]
+    fn test_string_interpolation_parsing_simple() {
+        assert_parser_snapshot!(
+            r#"node m { s <- "Hello { config::name }!" }"#,
         );
     }
 }

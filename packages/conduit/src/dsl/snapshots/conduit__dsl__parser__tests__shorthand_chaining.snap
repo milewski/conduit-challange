@@ -1,6 +1,6 @@
 ---
 source: packages/conduit/src/dsl/parser.rs
-expression: "NodeParser :: parse(r#\"name_a module_a <- name_b module_b <- \"hello\"\"#)"
+expression: nodes
 ---
 Ok(
     {
@@ -21,7 +21,11 @@ Ok(
             inputs: {
                 "input": String {
                     direction: Input,
-                    value: "hello",
+                    parts: [
+                        Literal(
+                            "hello",
+                        ),
+                    ],
                 },
                 "output": Relation {
                     identifier: "name_a",

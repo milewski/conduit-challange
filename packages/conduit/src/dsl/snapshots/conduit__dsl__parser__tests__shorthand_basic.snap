@@ -1,6 +1,6 @@
 ---
 source: packages/conduit/src/dsl/parser.rs
-expression: "NodeParser :: parse(r#\"module_a <- \"hello\"\"#)"
+expression: nodes
 ---
 Ok(
     {
@@ -10,7 +10,11 @@ Ok(
             inputs: {
                 "input": String {
                     direction: Input,
-                    value: "hello",
+                    parts: [
+                        Literal(
+                            "hello",
+                        ),
+                    ],
                 },
             },
         },

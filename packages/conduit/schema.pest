@@ -9,11 +9,16 @@ shorthand = { direction ~ value }
 body = { "{" ~ NEWLINE* ~ (parameter ~ NEWLINE*)* ~ "}" }
 parameter = { property ~ direction ~ value }
 
-string = { "\"" ~ inner_string ~ "\"" }
-inner_string = @{ char* }
+string = ${ "\"" ~ (interpolation | string_content)* ~ "\"" }
+string_content = @{ char+ }
+interpolation = { "{" ~ interpolation_content ~ "}" }
+interpolation_content = @{ (!"}" ~ ANY)* }
+
+interpolation_expression = { SOI ~ expression ~ EOI }
+
 char = _{
-    !("\"" | "\\") ~ ANY
-    | "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t")
+    !("\"" | "\\" | "{") ~ ANY
+    | "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | "{")
     | "\\" ~ ("u" ~ ASCII_HEX_DIGIT{4})
 }
 

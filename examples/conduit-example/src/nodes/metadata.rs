@@ -8,6 +8,7 @@ pub struct Metadata;
 
 #[derive(NodeOutput)]
 pub struct MetadataOutput {
+    pub name: String,
     pub width: u32,
     pub height: u32,
 }
@@ -21,6 +22,7 @@ impl ExecutableNode for Metadata {
         let image = image::load_from_memory(&input).map_err(|error| NodeError::Custom(error.to_string()))?;
 
         Ok(MetadataOutput {
+            name: "example".to_string(),
             width: image.width(),
             height: image.height(),
         })

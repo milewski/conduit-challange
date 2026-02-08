@@ -26,7 +26,7 @@ fn main() {
             width <- (width / 2)
             height <- (height / 2)
             output -> write_file {
-                destination <- "./examples/conduit-example/cover.smaller.png"
+                destination <- "./examples/conduit-example/cover.{ metadata::name }.png"
             }
         }
     "#;

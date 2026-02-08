@@ -1,5 +1,6 @@
 use crate::dsl::parser::{
-    Direction, Expression, Identifier, NodeInstruct, NodeParser, Operation, PIPELINE_RESULT_ID, ParsedWorkflow, Value,
+    Direction, Expression, Identifier, NodeInstruct, NodeParser, Operation, PIPELINE_RESULT_ID, ParsedWorkflow,
+    StringPart, Value,
 };
 use crate::node::FromSharedValue;
 use crate::node::SharedValue;
@@ -229,6 +230,21 @@ fn build_dependency_graph(
                         }
                     }
                 },
+                Value::String { parts, .. } => {
+                    for part in parts {
+                        if let StringPart::Interpolation(expr) = part {
+                            for (ref_id, _) in collect_expression_references(expr) {
+                                let ref_idx = index_map
+                                    .get(ref_id)
+                                    .or_else(|| index_map.get(&format!("__input_{}", ref_id)));
+
+                                if let (Some(&from), Some(&to)) = (ref_idx, index_map.get(id)) {
+                                    graph.add_edge(from, to, prop.clone());
+                                }
+                            }
+                        }
+                    }
+                }
                 Value::Expression { value: expr, .. } => {
                     for (ref_id, _) in collect_expression_references(expr) {
                         let ref_idx = index_map
@@ -290,8 +306,24 @@ fn resolve_inputs(
 
     for (name, value) in &instruct.inputs {
         match value {
-            Value::String { value, direction, .. } if *direction == Direction::Input => {
-                payload.insert(name.clone(), Arc::new(value.clone()) as SharedValue);
+            Value::String { parts, direction, .. } if *direction == Direction::Input => {
+                let mut result = String::new();
+                for part in parts {
+                    match part {
+                        StringPart::Literal(s) => result.push_str(s),
+                        StringPart::Interpolation(expr) => match expr {
+                            Expression::Reference { identifier, property } => {
+                                let val = resolve_reference(identifier, property, outputs, nodes, input_names);
+                                result.push_str(&shared_value_to_string(&val));
+                            }
+                            _ => {
+                                let val = evaluate_expression(expr, outputs, nodes, input_names);
+                                result.push_str(&val.to_string());
+                            }
+                        },
+                    }
+                }
+                payload.insert(name.clone(), Arc::new(result) as SharedValue);
             }
             Value::Numeric { value, direction, .. } if *direction == Direction::Input => {
                 payload.insert(name.clone(), Arc::new(value.parse::<u32>().unwrap()) as SharedValue);
@@ -336,7 +368,7 @@ fn resolve_inputs(
                     }
                 }
             }
-            _ => unreachable!("todo: validate that this is really unreachable.")
+            _ => {}
         }
     }
 
@@ -367,39 +399,8 @@ fn evaluate_expression(
     match expression {
         Expression::Number(value) => value.parse::<f64>().unwrap(),
         Expression::Reference { identifier, property } => {
-            // Try resolved outputs first (from executed nodes)
-            if let Some(dep_outputs) = outputs.get(identifier) {
-                if let Some(value) = dep_outputs.get(property) {
-                    return shared_value_to_f64(value);
-                }
-            }
-
-            // Try global input fallback if property is default "output" or "input" (depending on how it was parsed)
-            // Actually parser converts `height` to `Relation { identifier: "height", property: "output" }` (reversed from Input).
-            // So property is "output".
-            if property == "output" && input_names.contains(identifier) {
-                let input_node_id = format!("__input_{}", identifier);
-                if let Some(dep_outputs) = outputs.get(&input_node_id) {
-                    // println!("Keys in {}: {:?}", input_node_id, dep_outputs.keys());
-                    if let Some(value) = dep_outputs.get("output") {
-                        return shared_value_to_f64(value);
-                    }
-                }
-            }
-
-            // Fall back to literal inputs from parsed node (data-only nodes)
-            if let Some(instruct) = nodes.get(identifier) {
-                if let Some(value) = instruct.inputs.get(property) {
-                    return match value {
-                        Value::Numeric { value, .. } => value.parse::<f64>().unwrap(),
-                        Value::Expression { value: inner, .. } => {
-                            evaluate_expression(inner, outputs, nodes, input_names)
-                        }
-                        _ => panic!("Expression reference '{}::{}' is not numeric", identifier, property),
-                    };
-                }
-            }
-            panic!("Cannot resolve '{}::{}' in expression", identifier, property);
+            let value = resolve_reference(identifier, property, outputs, nodes, input_names);
+            shared_value_to_f64(&value)
         }
         Expression::BinaryOperation { operation, left, right } => {
             let left = evaluate_expression(left, outputs, nodes, input_names);
@@ -413,6 +414,89 @@ fn evaluate_expression(
                 Operation::Power => left.powf(right),
             }
         }
+    }
+}
+
+fn resolve_reference(
+    identifier: &str,
+    property: &str,
+    outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
+    nodes: &BTreeMap<Identifier, NodeInstruct>,
+    input_names: &std::collections::HashSet<String>,
+) -> SharedValue {
+    // Try resolved outputs first (from executed nodes)
+    if let Some(dep_outputs) = outputs.get(identifier) {
+        if let Some(value) = dep_outputs.get(property) {
+            return value.clone();
+        }
+    }
+
+    // Try global input fallback if property is default "output" or "input" (depending on how it was parsed)
+    if property == "output" && input_names.contains(identifier) {
+        let input_node_id = format!("__input_{}", identifier);
+        if let Some(dep_outputs) = outputs.get(&input_node_id) {
+            if let Some(value) = dep_outputs.get("output") {
+                return value.clone();
+            }
+        }
+    }
+
+    // Fall back to literal inputs from parsed node (data-only nodes)
+    if let Some(instruct) = nodes.get(identifier) {
+        if let Some(value) = instruct.inputs.get(property) {
+            return match value {
+                Value::Numeric { value, .. } => Arc::new(value.parse::<f64>().unwrap()),
+                Value::String { parts, .. } => {
+                    // Reconstruct string value (no interpolation support in recursion yet? or assume literal?)
+                    // If we are referencing a string from an expression, it likely shouldn't happen unless we support string ops.
+                    // But if we are just resolving it, we can return it.
+                    // CAUTION: If the referenced string HAS interpolation, we should evaluate it.
+                    // But evaluate_expression returns f64. This path is called from resolve_reference.
+                    // We can recursively call resolve_inputs logic? But resolve_inputs is for a whole node.
+
+                    // Simplify: Assume referenced string literals in data-only nodes are just literals for now
+                    // OR implement simple evaluation.
+                    let mut result = String::new();
+                    for part in parts {
+                        match part {
+                            StringPart::Literal(s) => result.push_str(s),
+                            StringPart::Interpolation(expr) => {
+                                // Recurse
+                                // But wait, if we are in resolve_reference, we might cause infinite loop if cycle?
+                                // DAG check handles cycles.
+                                match expr {
+                                    Expression::Reference { identifier, property } => {
+                                        let val = resolve_reference(identifier, property, outputs, nodes, input_names);
+                                        result.push_str(&shared_value_to_string(&val));
+                                    }
+                                    _ => {
+                                        let val = evaluate_expression(expr, outputs, nodes, input_names);
+                                        result.push_str(&val.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Arc::new(result)
+                }
+                Value::Boolean { value, .. } => Arc::new(*value),
+                Value::Expression { value: inner, .. } => {
+                    Arc::new(evaluate_expression(inner, outputs, nodes, input_names))
+                }
+                _ => panic!("Reference '{}::{}' type not supported", identifier, property),
+            };
+        }
+    }
+    panic!("Cannot resolve '{}::{}'", identifier, property);
+}
+
+fn shared_value_to_string(value: &SharedValue) -> String {
+    if let Some(v) = value.downcast_ref::<String>() {
+        v.clone()
+    } else if let Some(v) = value.downcast_ref::<&str>() {
+        v.to_string()
+    } else {
+        shared_value_to_f64(value).to_string()
     }
 }
 
@@ -730,33 +814,79 @@ mod tests {
         let result: Result<u32, _> = engine.run_pipeline_blocking(pipeline, ());
         assert!(result.is_err());
     }
-}
 
-#[test]
-fn test_resolve_external_inputs() {
-    // Define a node that uses an external input
-    let parsed = NodeParser::parse(
-        r#"
+    #[test]
+    fn test_resolve_external_inputs() {
+        // Define a node that uses an external input
+        let parsed = NodeParser::parse(
+            r#"
                 -> external_val <- 10
                 node module {
                     val <- external_val
                 }
             "#,
-    )
-    .unwrap();
+        )
+        .unwrap();
 
-    let instruct = &parsed.nodes[&String::from("node")];
+        let instruct = &parsed.nodes[&String::from("node")];
 
-    // Simulate outputs containing the injected input
-    let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
-    let mut input_out = HashMap::new();
-    input_out.insert("output".to_string(), Arc::new(99u32) as SharedValue); // 99 overrides default 10
-    outputs.insert("__input_external_val".to_string(), input_out);
+        // Simulate outputs containing the injected input
+        let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
+        let mut input_out = HashMap::new();
+        input_out.insert("output".to_string(), Arc::new(99u32) as SharedValue); // 99 overrides default 10
+        outputs.insert("__input_external_val".to_string(), input_out);
 
-    let mut input_names = std::collections::HashSet::new();
-    input_names.insert("external_val".to_string());
+        let mut input_names = std::collections::HashSet::new();
+        input_names.insert("external_val".to_string());
 
-    let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
 
-    assert_eq!(*payload["val"].downcast_ref::<u32>().unwrap(), 99);
+        assert_eq!(*payload["val"].downcast_ref::<u32>().unwrap(), 99);
+    }
+
+    #[test]
+    fn test_string_interpolation_with_expression() {
+        let parsed = NodeParser::parse(
+            r#"
+                config _ { width <- 100 }
+                node module { filename <- "cover.{ (config::width + 1) }.png" }
+            "#,
+        )
+        .unwrap();
+
+        let instruct = &parsed.nodes[&String::from("node")];
+
+        let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
+        let mut config_out = HashMap::new();
+        config_out.insert("width".to_string(), Arc::new(100u32) as SharedValue);
+        outputs.insert("config".to_string(), config_out);
+
+        let input_names = std::collections::HashSet::new();
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+
+        assert_eq!(*payload["filename"].downcast_ref::<String>().unwrap(), "cover.101.png");
+    }
+
+    #[test]
+    fn test_string_interpolation_with_string_value() {
+        let parsed = NodeParser::parse(
+            r#"
+                config _ { name <- "world" }
+                node module { msg <- "hello { config::name }" }
+            "#,
+        )
+        .unwrap();
+
+        let instruct = &parsed.nodes[&String::from("node")];
+
+        let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
+        let mut config_out = HashMap::new();
+        config_out.insert("name".to_string(), Arc::new("world".to_string()) as SharedValue);
+        outputs.insert("config".to_string(), config_out);
+
+        let input_names = std::collections::HashSet::new();
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+
+        assert_eq!(*payload["msg"].downcast_ref::<String>().unwrap(), "hello world");
+    }
 }
