@@ -307,6 +307,15 @@ mod tests {
     }
 
     #[test]
+    fn test_cannot_add_string_with_string() {
+        let output: Result<u32, _> = pipeline_result! {r#"
+            <- ("a" + "b")
+        "#};
+
+        assert!(matches!(output, Err(NodeError::NotANumericType)));
+    }
+
+    #[test]
     fn test_parse_error() {
         let output: Result<(), _> = pipeline_result! {r#"
             INVALID SYNTAX
