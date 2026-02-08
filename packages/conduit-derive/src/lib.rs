@@ -81,14 +81,14 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         #ident: payload
                             .get("input")
                             .or_else(|| payload.get(#ident_str))
-                            .ok_or(conduit::node::NodeError::MissingInput("input or explicit field"))
+                            .ok_or(conduit::node::NodeError::MissingInput("input or explicit field".to_string()))
                             .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
                     };
                 } else {
                     return quote! {
                         #ident: payload
                             .get(#ident_str)
-                            .ok_or(conduit::node::NodeError::MissingInput(#ident_str))
+                            .ok_or(conduit::node::NodeError::MissingInput(#ident_str.to_string()))
                             .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
                     };
                 }
@@ -247,14 +247,14 @@ pub fn derive_node_input(input: TokenStream) -> TokenStream {
                 #field_name: payload
                     .get("input")
                     .or_else(|| payload.get(#field_name_str))
-                    .ok_or(conduit::node::NodeError::MissingInput("input or explicit field"))
+                    .ok_or(conduit::node::NodeError::MissingInput("input or explicit field".to_string()))
                     .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
             }
         } else {
             quote! {
                 #field_name: payload
                     .get(#field_name_str)
-                    .ok_or(conduit::node::NodeError::MissingInput(#field_name_str))
+                    .ok_or(conduit::node::NodeError::MissingInput(#field_name_str.to_string()))
                     .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
             }
         }

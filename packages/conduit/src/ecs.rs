@@ -35,14 +35,14 @@ impl Engine {
         self.runtime.block_on(self.run_pipeline_async(workflow, input))
     }
 
-    pub fn validate_modules(&self, nodes: &BTreeMap<Identifier, NodeInstruct>) -> Result<(), String> {
+    pub fn validate_modules(&self, nodes: &BTreeMap<Identifier, NodeInstruct>) -> Result<(), crate::node::NodeError> {
         for (_, instruct) in nodes {
             let module_name = &instruct.module;
             if module_name != "_" && module_name != "__input__" && !self.registry.has(module_name) {
-                return Err(format!(
+                return Err(crate::node::NodeError::ModuleValidationError(format!(
                     "Unknown module '{}' in node '{}'",
                     module_name, instruct.identifier
-                ));
+                )));
             }
         }
         Ok(())
@@ -53,15 +53,13 @@ impl Engine {
         workflow: &str,
         input: I,
     ) -> Result<T, crate::node::NodeError> {
-        let ParsedWorkflow {
-            mut nodes,
-            inputs: input_definitions,
-        } = NodeParser::parse(workflow).unwrap();
+        let ParsedWorkflow { mut nodes, inputs } =
+            NodeParser::parse(workflow).map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?;
 
         // Create nodes for inputs
         let mut input_names = std::collections::HashSet::new();
 
-        for (name, default_value) in &input_definitions {
+        for (name, default_value) in &inputs {
             input_names.insert(name.clone());
 
             let node_name = format!("__input_{}", name);
@@ -75,9 +73,7 @@ impl Engine {
         }
 
         // Validate that all modules are either registered or are ignored (_)
-        if let Err(e) = self.validate_modules(&nodes) {
-            panic!("{}", e);
-        }
+        self.validate_modules(&nodes)?;
 
         let has_result = nodes.contains_key(PIPELINE_RESULT_ID);
 
@@ -102,7 +98,7 @@ impl Engine {
         // Phase 1: Resolve inputs first
         for (id, instruct) in &nodes {
             if instruct.module == "__input__" {
-                let payload = resolve_inputs(instruct, &outputs, &nodes, &input_names);
+                let payload = resolve_inputs(instruct, &outputs, &nodes, &input_names)?;
                 let default_value = payload.get("default").cloned();
 
                 // The original input name is extracted from the node name (removing __input_ prefix)
@@ -112,7 +108,7 @@ impl Engine {
                 } else if let Some(value) = default_value {
                     value
                 } else {
-                    panic!("Missing input '{}'", name);
+                    return Err(crate::node::NodeError::MissingInput(name.to_string()));
                 };
 
                 let mut map = HashMap::new();
@@ -133,7 +129,7 @@ impl Engine {
                     continue;
                 }
 
-                outputs.insert(id.clone(), resolve_inputs(instruct, &outputs, &nodes, &input_names));
+                outputs.insert(id.clone(), resolve_inputs(instruct, &outputs, &nodes, &input_names)?);
             }
         }
 
@@ -155,7 +151,7 @@ impl Engine {
                     continue;
                 }
 
-                let payload = resolve_inputs(instruct, &outputs, &nodes, &input_names);
+                let payload = resolve_inputs(instruct, &outputs, &nodes, &input_names)?;
                 let module_name = instruct.module.clone();
                 let registry = self.registry.clone();
 
@@ -163,17 +159,19 @@ impl Engine {
                 handles.push(tokio::spawn(async move {
                     let instance = registry
                         .create(&module_name, Default::default())
-                        .unwrap_or_else(|| panic!("Module '{}' not found in registry", module_name));
+                        .ok_or_else(|| crate::node::NodeError::ModuleNotFound(module_name.clone()))?;
 
-                    instance
-                        .run_with_payload(payload)
-                        .await
-                        .unwrap_or_else(|error| panic!("Node execution failed: {}", error))
+                    instance.run_with_payload(payload).await
                 }));
             }
 
             for (handle, id) in handles.into_iter().zip(handle_ids) {
-                let node_outputs = handle.await.unwrap();
+                let node_result = handle
+                    .await
+                    .map_err(|error| crate::node::NodeError::TaskExecutionError(error.to_string()))?;
+
+                let node_outputs = node_result?;
+
                 let map: HashMap<String, SharedValue> = node_outputs
                     .into_iter()
                     .map(|(key, value)| (key.to_string(), value))
@@ -186,13 +184,11 @@ impl Engine {
         // Resolve and return the pipeline result if defined
         if has_result {
             let result_instruct = &nodes[PIPELINE_RESULT_ID];
-            let resolved = resolve_inputs(result_instruct, &outputs, &nodes, &input_names);
+            let resolved = resolve_inputs(result_instruct, &outputs, &nodes, &input_names)?;
             if let Some(value) = resolved.into_values().next() {
                 T::from_shared_value(&value)
             } else {
-                Err(crate::node::NodeError::Custom(
-                    "Pipeline result not resolved".to_string(),
-                ))
+                Err(crate::node::NodeError::PipelineResultNotResolved)
             }
         } else {
             // If no result is defined, try to convert from "empty/void"
@@ -200,9 +196,7 @@ impl Engine {
             // But SharedValue is Arc<dyn Any>. We can pass Arc::new(()).
             let unit: SharedValue = Arc::new(());
 
-            T::from_shared_value(&unit).map_err(|_| {
-                crate::node::NodeError::Custom("No pipeline result defined (no `<- value` statement)".to_string())
-            })
+            T::from_shared_value(&unit).map_err(|_| crate::node::NodeError::NoPipelineResultDefined)
         }
     }
 }
@@ -296,12 +290,12 @@ fn evaluate_string_interpolation(
     outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
     nodes: &BTreeMap<Identifier, NodeInstruct>,
     input_names: &std::collections::HashSet<String>,
-) -> String {
+) -> Result<String, crate::node::NodeError> {
     match expression {
         Expression::Reference { identifier, property } => {
-            shared_value_to_string(&resolve_reference(identifier, property, outputs, nodes, input_names))
+            shared_value_to_string(&resolve_reference(identifier, property, outputs, nodes, input_names)?)
         }
-        _ => evaluate_expression(expression, outputs, nodes, input_names).to_string(),
+        _ => Ok(evaluate_expression(expression, outputs, nodes, input_names)?.to_string()),
     }
 }
 
@@ -310,19 +304,19 @@ fn resolve_string_parts(
     outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
     nodes: &BTreeMap<Identifier, NodeInstruct>,
     input_names: &std::collections::HashSet<String>,
-) -> SharedValue {
+) -> Result<String, crate::node::NodeError> {
     let mut result = String::new();
 
     for part in parts {
         match part {
             StringPart::Literal(string) => result.push_str(string),
             StringPart::Interpolation(expression) => {
-                result.push_str(&evaluate_string_interpolation(expression, outputs, nodes, input_names));
+                result.push_str(&evaluate_string_interpolation(expression, outputs, nodes, input_names)?);
             }
         }
     }
 
-    Arc::new(result)
+    Ok(result)
 }
 
 fn is_input_direction(value: &Value) -> bool {
@@ -414,16 +408,16 @@ fn resolve_inputs(
     outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
     nodes: &BTreeMap<Identifier, NodeInstruct>,
     input_names: &std::collections::HashSet<String>,
-) -> Payload {
+) -> Result<Payload, crate::node::NodeError> {
     let mut payload = HashMap::new();
 
     for (name, value) in &instruct.inputs {
         if is_input_direction(value) {
-            payload.insert(name.clone(), resolve_single_value(value, outputs, nodes, input_names));
+            payload.insert(name.clone(), resolve_single_value(value, outputs, nodes, input_names)?);
         }
     }
 
-    payload
+    Ok(payload)
 }
 
 fn resolve_single_value(
@@ -431,31 +425,31 @@ fn resolve_single_value(
     outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
     nodes: &BTreeMap<Identifier, NodeInstruct>,
     input_names: &std::collections::HashSet<String>,
-) -> SharedValue {
+) -> Result<SharedValue, crate::node::NodeError> {
     match value {
-        Value::String { parts, .. } => resolve_string_parts(parts, outputs, nodes, input_names),
+        Value::String { parts, .. } => Ok(Arc::new(resolve_string_parts(parts, outputs, nodes, input_names)?)),
         Value::Numeric { value, .. } => {
             // Try parsing as integer (i128) then float (f64)
             if let Ok(i) = value.parse::<i128>() {
-                Arc::new(i) as SharedValue
+                Ok(Arc::new(i) as SharedValue)
             } else if let Ok(f) = value.parse::<f64>() {
-                Arc::new(f) as SharedValue
+                Ok(Arc::new(f) as SharedValue)
             } else {
                 // Fallback or error?
                 // Parser grammar ensures it's a number, so it should parse as f64 at least.
-                Arc::new(value.parse::<f64>().expect("valid number")) as SharedValue
+                Ok(Arc::new(value.parse::<f64>().expect("valid number")) as SharedValue)
             }
         }
         Value::Expression { value, .. } => {
-            let result = evaluate_expression(value, outputs, nodes, input_names);
+            let result = evaluate_expression(value, outputs, nodes, input_names)?;
 
             if result >= 0.0 && result <= u32::MAX as f64 {
-                Arc::new(result as u32) as SharedValue
+                Ok(Arc::new(result as u32) as SharedValue)
             } else {
-                Arc::new(result) as SharedValue
+                Ok(Arc::new(result) as SharedValue)
             }
         }
-        Value::Boolean { value, .. } => Arc::new(*value) as SharedValue,
+        Value::Boolean { value, .. } => Ok(Arc::new(*value) as SharedValue),
         Value::Relation {
             identifier, property, ..
         } => resolve_reference(identifier, property, outputs, nodes, input_names),
@@ -463,10 +457,10 @@ fn resolve_single_value(
             let mut resolved = Vec::new();
 
             for value in values {
-                resolved.push(resolve_single_value(value, outputs, nodes, input_names));
+                resolved.push(resolve_single_value(value, outputs, nodes, input_names)?);
             }
 
-            Arc::new(resolved) as SharedValue
+            Ok(Arc::new(resolved) as SharedValue)
         }
     }
 }
@@ -491,22 +485,22 @@ fn evaluate_expression(
     outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
     nodes: &BTreeMap<Identifier, NodeInstruct>,
     input_names: &std::collections::HashSet<String>,
-) -> f64 {
+) -> Result<f64, crate::node::NodeError> {
     match expression {
-        Expression::Number(value) => value.parse::<f64>().unwrap(),
+        Expression::Number(value) => Ok(value.parse::<f64>().unwrap()),
         Expression::Reference { identifier, property } => {
-            shared_value_to_f64(&resolve_reference(identifier, property, outputs, nodes, input_names))
+            shared_value_to_f64(&resolve_reference(identifier, property, outputs, nodes, input_names)?)
         }
         Expression::BinaryOperation { operation, left, right } => {
-            let left = evaluate_expression(left, outputs, nodes, input_names);
-            let right = evaluate_expression(right, outputs, nodes, input_names);
+            let left = evaluate_expression(left, outputs, nodes, input_names)?;
+            let right = evaluate_expression(right, outputs, nodes, input_names)?;
 
             match operation {
-                Operation::Add => left + right,
-                Operation::Subtract => left - right,
-                Operation::Multiply => left * right,
-                Operation::Divide => left / right,
-                Operation::Power => left.powf(right),
+                Operation::Add => Ok(left + right),
+                Operation::Subtract => Ok(left - right),
+                Operation::Multiply => Ok(left * right),
+                Operation::Divide => Ok(left / right),
+                Operation::Power => Ok(left.powf(right)),
             }
         }
     }
@@ -518,18 +512,18 @@ fn resolve_reference(
     outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
     nodes: &BTreeMap<Identifier, NodeInstruct>,
     input_names: &std::collections::HashSet<String>,
-) -> SharedValue {
+) -> Result<SharedValue, crate::node::NodeError> {
     // Try resolved outputs first (from executed nodes)
     if let Some(dependency_outputs) = outputs.get(identifier) {
         if let Some(value) = dependency_outputs.get(property) {
-            return value.clone();
+            return Ok(value.clone());
         }
     }
 
     // Try global input fallback if property is default "output" or "input" (depending on how it was parsed)
     if property == "output" && input_names.contains(identifier) {
         if let Some(value) = resolve_input_fallback(identifier, outputs) {
-            return value;
+            return Ok(value);
         }
     }
 
@@ -539,47 +533,55 @@ fn resolve_reference(
             return match value {
                 Value::Numeric { value, .. } => {
                     if let Ok(i) = value.parse::<i128>() {
-                        Arc::new(i as f64) // For expressions, we still need f64 currently
+                        Ok(Arc::new(i as f64)) // For expressions, we still need f64 currently
                     } else {
-                        Arc::new(value.parse::<f64>().unwrap())
+                        Ok(Arc::new(value.parse::<f64>().unwrap()))
                     }
                 }
-                Value::String { parts, .. } => resolve_string_parts(parts, outputs, nodes, input_names),
-                Value::Boolean { value, .. } => Arc::new(*value),
-                Value::Expression { value, .. } => Arc::new(evaluate_expression(value, outputs, nodes, input_names)),
-                _ => panic!("Reference '{}::{}' type not supported", identifier, property),
+                Value::String { parts, .. } => Ok(Arc::new(resolve_string_parts(parts, outputs, nodes, input_names)?)),
+                Value::Boolean { value, .. } => Ok(Arc::new(*value)),
+                Value::Expression { value, .. } => {
+                    Ok(Arc::new(evaluate_expression(value, outputs, nodes, input_names)?))
+                }
+                _ => Err(crate::node::NodeError::ReferenceTypeNotSupported {
+                    identifier: identifier.to_string(),
+                    property: property.to_string(),
+                }),
             };
         }
     }
 
-    panic!("Cannot resolve '{}::{}'", identifier, property);
+    Err(crate::node::NodeError::ReferenceResolutionError {
+        identifier: identifier.to_string(),
+        property: property.to_string(),
+    })
 }
 
-fn shared_value_to_string(value: &SharedValue) -> String {
+fn shared_value_to_string(value: &SharedValue) -> Result<String, crate::node::NodeError> {
     if let Some(value) = value.downcast_ref::<String>() {
-        value.clone()
+        Ok(value.clone())
     } else if let Some(value) = value.downcast_ref::<&str>() {
-        value.to_string()
+        Ok(value.to_string())
     } else {
-        shared_value_to_f64(value).to_string()
+        Ok(shared_value_to_f64(value)?.to_string())
     }
 }
 
-fn shared_value_to_f64(value: &SharedValue) -> f64 {
+fn shared_value_to_f64(value: &SharedValue) -> Result<f64, crate::node::NodeError> {
     if let Some(v) = value.downcast_ref::<f64>() {
-        *v
+        Ok(*v)
     } else if let Some(v) = value.downcast_ref::<i128>() {
-        *v as f64
+        Ok(*v as f64)
     } else if let Some(v) = value.downcast_ref::<u32>() {
-        *v as f64
+        Ok(*v as f64)
     } else if let Some(v) = value.downcast_ref::<i32>() {
-        *v as f64
+        Ok(*v as f64)
     } else if let Some(v) = value.downcast_ref::<i64>() {
-        *v as f64
+        Ok(*v as f64)
     } else if let Some(v) = value.downcast_ref::<f32>() {
-        *v as f64
+        Ok(*v as f64)
     } else {
-        panic!("Expression reference value is not a numeric type")
+        Err(crate::node::NodeError::NotANumericType)
     }
 }
 
@@ -693,7 +695,7 @@ mod tests {
         let instruct = &parsed.nodes[&String::from("a")];
         let outputs = HashMap::new();
         let input_names = std::collections::HashSet::new();
-        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names).unwrap();
 
         assert_eq!(payload.len(), 3);
         assert_eq!(*payload["s"].downcast_ref::<String>().unwrap(), "hello");
@@ -708,7 +710,7 @@ mod tests {
         let instruct = &parsed.nodes[&String::from("a")];
         let outputs = HashMap::new();
         let input_names = std::collections::HashSet::new();
-        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names).unwrap();
 
         assert_eq!(*payload["x"].downcast_ref::<u32>().unwrap(), 30);
     }
@@ -731,7 +733,7 @@ mod tests {
 
         let instruct = &parsed.nodes[&String::from("img")];
         let input_names = std::collections::HashSet::new();
-        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names).unwrap();
 
         assert_eq!(*payload["width"].downcast_ref::<u32>().unwrap(), 128);
     }
@@ -773,7 +775,7 @@ mod tests {
 
         let instruct = &parsed.nodes[&String::from("img")];
         let input_names = std::collections::HashSet::new();
-        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names).unwrap();
 
         // 545 / 2 = 272.5, which should be truncated to 272
         assert_eq!(*payload["height"].downcast_ref::<u32>().unwrap(), 272);
@@ -800,22 +802,19 @@ mod tests {
 
         let instruct = &parsed.nodes[&String::from("c")];
         let input_names = std::collections::HashSet::new();
-        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names).unwrap();
 
         // 10 + 3 * 2 = 16 (respects operator precedence)
         assert_eq!(*payload["z"].downcast_ref::<u32>().unwrap(), 16);
     }
 
     #[test]
-    #[should_panic(expected = "Unknown module 'invalid'")]
-    fn test_invalid_module_panics() {
+    fn test_invalid_module_error() {
         let engine = Engine::new();
         let parsed = NodeParser::parse(r#"a invalid { x <- 1 }"#).unwrap();
 
-        // This should return Err, but we panic on error
-        if let Err(e) = engine.validate_modules(&parsed.nodes) {
-            panic!("{}", e);
-        }
+        let result = engine.validate_modules(&parsed.nodes);
+        assert!(matches!(result, Err(crate::node::NodeError::ModuleValidationError(_))));
     }
 
     #[test]
@@ -825,7 +824,7 @@ mod tests {
         let instruct = &parsed.nodes[&String::from("config")];
         let outputs = HashMap::new();
         let input_names = std::collections::HashSet::new();
-        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names).unwrap();
 
         // Should work without error, just returns the literal value
         assert_eq!(*payload["multiplier"].downcast_ref::<i128>().unwrap(), 5);
@@ -871,7 +870,7 @@ mod tests {
         let mut engine = Engine::new();
         let pipeline = r#"config _ { value <- 42 }"#;
         let result: Result<String, _> = engine.run_pipeline_blocking(pipeline, ());
-        assert!(result.is_err());
+        assert!(matches!(result, Err(crate::node::NodeError::NoPipelineResultDefined)));
     }
 
     #[test]
@@ -879,7 +878,7 @@ mod tests {
         let mut engine = Engine::new();
         let pipeline = r#"<- "hello""#;
         let result: Result<u32, _> = engine.run_pipeline_blocking(pipeline, ());
-        assert!(result.is_err());
+        assert!(matches!(result, Err(crate::node::NodeError::TypeMismatch { .. })));
     }
 
     #[test]
@@ -906,7 +905,7 @@ mod tests {
         let mut input_names = std::collections::HashSet::new();
         input_names.insert("external_val".to_string());
 
-        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names).unwrap();
 
         assert_eq!(*payload["val"].downcast_ref::<u32>().unwrap(), 99);
     }
@@ -929,7 +928,7 @@ mod tests {
         outputs.insert("config".to_string(), config_out);
 
         let input_names = std::collections::HashSet::new();
-        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names).unwrap();
 
         assert_eq!(*payload["filename"].downcast_ref::<String>().unwrap(), "cover.101.png");
     }
@@ -952,7 +951,7 @@ mod tests {
         outputs.insert("config".to_string(), config_out);
 
         let input_names = std::collections::HashSet::new();
-        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names);
+        let payload = resolve_inputs(instruct, &outputs, &parsed.nodes, &input_names).unwrap();
 
         assert_eq!(*payload["msg"].downcast_ref::<String>().unwrap(), "hello world");
     }

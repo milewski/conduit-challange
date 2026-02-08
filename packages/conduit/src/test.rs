@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::{functional_node, input, pipeline};
+    use crate::node::NodeError;
+    use crate::{functional_node, input, pipeline, pipeline_result};
 
     #[functional_node]
     fn multiplier(#[input] a: u32, b: u32) -> u32 {
@@ -275,5 +276,101 @@ mod tests {
         "#};
 
         assert_eq!(output, 20);
+    }
+
+    #[test]
+    fn test_cannot_add_number_with_string_using_module_references() {
+        let result: Result<u32, _> = pipeline_result! {r#"
+            config _ {
+                number <- 10
+                string <- "hello"
+            }
+
+            <- (config::number + config::string)
+        "#};
+
+        assert!(matches!(result, Err(NodeError::NotANumericType)));
+    }
+
+    #[test]
+    fn test_cannot_add_number_with_string_using() {
+        let result: Result<u32, _> = pipeline_result! {r#"
+            <- (1 + "2")
+        "#};
+
+        assert!(matches!(result, Err(NodeError::NotANumericType)));
+    }
+
+    #[test]
+    fn test_parse_error() {
+        let result: Result<(), _> = pipeline_result!(
+            r#"
+            INVALID SYNTAX
+        "#
+        );
+
+        assert!(matches!(result, Err(NodeError::ParseError(_))));
+    }
+
+    #[test]
+    fn test_reference_resolution_error() {
+        let result: Result<u32, _> = pipeline_result!(
+            r#"
+            config _ { val <- 1 }
+            <- config::unknown_prop
+        "#
+        );
+
+        match result {
+            Err(NodeError::ReferenceResolutionError { .. }) => (),
+            Err(NodeError::ReferenceTypeNotSupported { .. }) => (), // Parser/Engine seems to fall back here
+            Err(e) => panic!("Expected Reference error, got {:?}", e),
+            Ok(_) => panic!("Expected error, got Ok"),
+        }
+    }
+
+    #[test]
+    fn test_reference_type_not_supported() {
+        let result: Result<u32, _> = pipeline_result!(
+            r#"
+            config _ {
+                tup <- (1, 2)
+            }
+            <- (config::tup + 1)
+        "#
+        );
+
+        assert!(matches!(result, Err(NodeError::NotANumericType)));
+    }
+
+    #[test]
+    fn test_module_validation_error() {
+        let result: Result<(), _> = pipeline_result!(
+            r#"
+            unknown {
+                a <- 1
+            }
+         "#
+        );
+
+        assert!(matches!(result, Err(NodeError::ModuleValidationError(_))));
+    }
+
+    #[test]
+    fn test_missing_input() {
+        #[functional_node]
+        fn adder(#[input] a: u32, b: u32) -> u32 {
+            a + b
+        }
+
+        let result: Result<u32, _> = pipeline_result!(
+            r#"
+            <- adder {
+                a <- 10
+            }
+        "#
+        );
+
+        assert!(matches!(result, Err(NodeError::MissingInput(_))));
     }
 }

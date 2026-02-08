@@ -17,8 +17,8 @@ macro_rules! impl_from_shared_value_primitive {
                         .downcast_ref::<$t>()
                         .cloned()
                         .ok_or_else(|| NodeError::TypeMismatch {
-                            field: "result",
-                            expected: type_name::<$t>(),
+                            field: "result".to_string(),
+                            expected: type_name::<$t>().to_string(),
                         })
                 }
             }
@@ -35,8 +35,8 @@ macro_rules! impl_from_shared_value_numeric {
                 fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
                     if let Some(v) = value.downcast_ref::<i128>() {
                         return <$t>::try_from(*v).map_err(|_| NodeError::TypeMismatch {
-                             field: "result",
-                             expected: concat!("castable from i128 to ", stringify!($t)),
+                             field: "result".to_string(),
+                             expected: concat!("castable from i128 to ", stringify!($t)).to_string(),
                         });
                     }
                     if let Some(v) = value.downcast_ref::<f64>() {
@@ -51,8 +51,8 @@ macro_rules! impl_from_shared_value_numeric {
                     }
 
                     Err(NodeError::TypeMismatch {
-                        field: "result",
-                        expected: concat!("numeric value for ", stringify!($t)),
+                        field: "result".to_string(),
+                        expected: concat!("numeric value for ", stringify!($t)).to_string(),
                     })
                 }
             }
@@ -79,8 +79,8 @@ macro_rules! impl_from_shared_value_float {
                     }
 
                     Err(NodeError::TypeMismatch {
-                        field: "result",
-                        expected: concat!("numeric value for ", stringify!($t)),
+                        field: "result".to_string(),
+                        expected: concat!("numeric value for ", stringify!($t)).to_string(),
                     })
                 }
             }
@@ -96,16 +96,40 @@ impl FromSharedValue for () {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq)]
 pub enum NodeError {
     #[error("missing input field: {0}")]
-    MissingInput(&'static str),
+    MissingInput(String),
 
     #[error("type mismatch for field '{field}': expected {expected}")]
-    TypeMismatch {
-        field: &'static str,
-        expected: &'static str,
-    },
+    TypeMismatch { field: String, expected: String },
+
+    #[error("Parse error: {0}")]
+    ParseError(String),
+
+    #[error("Module validation error: {0}")]
+    ModuleValidationError(String),
+
+    #[error("Module '{0}' not found in registry")]
+    ModuleNotFound(String),
+
+    #[error("Task execution error: {0}")]
+    TaskExecutionError(String),
+
+    #[error("Pipeline result not resolved")]
+    PipelineResultNotResolved,
+
+    #[error("No pipeline result defined (no `<- value` statement)")]
+    NoPipelineResultDefined,
+
+    #[error("Reference '{identifier}::{property}' type not supported")]
+    ReferenceTypeNotSupported { identifier: String, property: String },
+
+    #[error("Cannot resolve '{identifier}::{property}'")]
+    ReferenceResolutionError { identifier: String, property: String },
+
+    #[error("Expression reference value is not a numeric type")]
+    NotANumericType,
 
     #[error("{0}")]
     Custom(String),
@@ -152,8 +176,8 @@ macro_rules! impl_from_shared_value_tuple {
                     )+))
                 } else {
                     Err(NodeError::TypeMismatch {
-                        field: "result",
-                        expected: "Vec<SharedValue> (Tuple)",
+                        field: "result".to_string(),
+                        expected: "Vec<SharedValue> (Tuple)".to_string(),
                     })
                 }
             }

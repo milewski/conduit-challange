@@ -33,7 +33,7 @@ macro_rules! impl_node_input_single {
                     .get("input")
                     .and_then(|v| v.downcast_ref::<$t>())
                     .cloned()
-                    .ok_or(NodeError::MissingInput("input"))
+                    .ok_or(NodeError::MissingInput("input".to_string()))
             }
             fn field_names() -> Vec<&'static str> {
                 vec!["input"]
