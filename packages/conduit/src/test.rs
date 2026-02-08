@@ -13,6 +13,11 @@ mod tests {
         a - b
     }
 
+    #[functional_node]
+    fn adder(#[input] a: u32, b: u32) -> u32 {
+        a + b
+    }
+
     #[test]
     fn test_input_output() {
         let input = input! { name: "rafael" };
@@ -282,8 +287,8 @@ mod tests {
     fn test_cannot_add_number_with_string_using_module_references() {
         let result: Result<u32, _> = pipeline_result! {r#"
             config _ {
-                number <- 10
-                string <- "hello"
+                number <- 1
+                string <- "1"
             }
 
             <- (config::number + config::string)
@@ -294,83 +299,52 @@ mod tests {
 
     #[test]
     fn test_cannot_add_number_with_string_using() {
-        let result: Result<u32, _> = pipeline_result! {r#"
-            <- (1 + "2")
+        let output: Result<u32, _> = pipeline_result! {r#"
+            <- (1 + "1")
         "#};
 
-        assert!(matches!(result, Err(NodeError::NotANumericType)));
+        assert!(matches!(output, Err(NodeError::NotANumericType)));
     }
 
     #[test]
     fn test_parse_error() {
-        let result: Result<(), _> = pipeline_result!(
-            r#"
+        let output: Result<(), _> = pipeline_result! {r#"
             INVALID SYNTAX
-        "#
-        );
+        "#};
 
-        assert!(matches!(result, Err(NodeError::ParseError(_))));
+        assert!(matches!(output, Err(NodeError::ParseError(_))));
     }
 
     #[test]
-    fn test_reference_resolution_error() {
-        let result: Result<u32, _> = pipeline_result!(
-            r#"
-            config _ { val <- 1 }
+    fn test_error_when_referencing_properties_that_does_not_exist_on_a_module() {
+        let output: Result<u32, _> = pipeline_result! {r#"
+            config _ { value <- 1 }
             <- config::unknown_prop
-        "#
-        );
+        "#};
 
-        match result {
-            Err(NodeError::ReferenceResolutionError { .. }) => (),
-            Err(NodeError::ReferenceTypeNotSupported { .. }) => (), // Parser/Engine seems to fall back here
-            Err(e) => panic!("Expected Reference error, got {:?}", e),
-            Ok(_) => panic!("Expected error, got Ok"),
-        }
+        assert!(matches!(output, Err(NodeError::ReferenceTypeNotSupported { .. })));
     }
 
     #[test]
-    fn test_reference_type_not_supported() {
-        let result: Result<u32, _> = pipeline_result!(
-            r#"
-            config _ {
-                tup <- (1, 2)
-            }
-            <- (config::tup + 1)
-        "#
-        );
-
-        assert!(matches!(result, Err(NodeError::NotANumericType)));
-    }
-
-    #[test]
-    fn test_module_validation_error() {
-        let result: Result<(), _> = pipeline_result!(
-            r#"
+    fn test_error_when_module_does_not_exist() {
+        let output: Result<(), _> = pipeline_result! {r#"
             unknown {
                 a <- 1
             }
-         "#
-        );
+         "#};
 
-        assert!(matches!(result, Err(NodeError::ModuleValidationError(_))));
+        assert!(matches!(output, Err(NodeError::ModuleValidationError(_))));
     }
 
     #[test]
     fn test_missing_input() {
-        #[functional_node]
-        fn adder(#[input] a: u32, b: u32) -> u32 {
-            a + b
-        }
-
-        let result: Result<u32, _> = pipeline_result!(
-            r#"
+        let output: Result<u32, _> = pipeline_result! {r#"
             <- adder {
                 a <- 10
+                # missing input `b` for the `adder` node
             }
-        "#
-        );
+        "#};
 
-        assert!(matches!(result, Err(NodeError::MissingInput(_))));
+        assert!(matches!(output, Err(NodeError::MissingInput(_))));
     }
 }

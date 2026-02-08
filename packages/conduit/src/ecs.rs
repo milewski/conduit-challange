@@ -469,6 +469,7 @@ fn resolve_single_value(
 fn collect_expression_references(expression: &Expression) -> Vec<(&str, &str)> {
     match expression {
         Expression::Number(_) => vec![],
+        Expression::String(_) => vec![],
         Expression::Reference { identifier, property } => vec![(identifier.as_str(), property.as_str())],
         Expression::BinaryOperation { left, right, .. } => {
             let mut references = collect_expression_references(left);
@@ -488,6 +489,7 @@ fn evaluate_expression(
 ) -> Result<f64, crate::node::NodeError> {
     match expression {
         Expression::Number(value) => Ok(value.parse::<f64>().unwrap()),
+        Expression::String(_) => Err(crate::node::NodeError::NotANumericType),
         Expression::Reference { identifier, property } => {
             shared_value_to_f64(&resolve_reference(identifier, property, outputs, nodes, input_names)?)
         }

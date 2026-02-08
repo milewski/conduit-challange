@@ -10,6 +10,7 @@ use uuid::Uuid;
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum Expression {
     Number(String),
+    String(String),
     Reference {
         identifier: String,
         property: String,
@@ -430,6 +431,7 @@ impl Visitor {
             .map_primary(|primary| -> Result<Expression, ParserError> {
                 match primary.as_rule() {
                     Rule::number => Ok(Expression::Number(primary.as_str().to_string())),
+                    Rule::string => Ok(Expression::String(primary.as_str().to_string())),
                     Rule::relation => {
                         let mut pairs = primary.into_inner();
                         let identifier = pairs.next().unwrap().as_str().to_string();

@@ -37,7 +37,7 @@ array_map = { "[" ~ NEWLINE* ~ (node ~ NEWLINE*)* ~ "]" }
 value = { string | boolean | tuple | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier | array_map }
 
 expression = { numeric ~ (operation ~ numeric)* }
-numeric = _{ number | relation | identifier | "(" ~ expression ~ ")" }
+numeric = _{ number | string | relation | identifier | "(" ~ expression ~ ")" }
 
 operation = _{ add | subtract | multiply | divide | power }
     add      = { "+" }
