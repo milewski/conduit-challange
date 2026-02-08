@@ -110,13 +110,17 @@ mod tests {
     }
 
     #[test]
-    fn test_tuple_returns_can_also_be_expressed_as_multiple_returns() {
-        let (a, b): (String, String) = pipeline! {r#"
-            <- a _::a { a <- "a" }
-            <- b _ { output <- "b" }
+    fn test_multiple_returns_are_supported_and_is_equivalent_as_returning_tuples() {
+        let (a, b, c, d): (String, String, String, (u32, u32)) = pipeline! {r#"
+            <- a _::a {      a <- "a" } # module a returning the `a` property
+            <- b _    { output <- "b" } # module b returning the ::output implicity
+            <-   _    { output <- "c" } # anonymous module returning ::output implicity
+            <- (2, 3)                   # returning a tuple directly without a module
         "#};
 
         assert_eq!(a, "a");
         assert_eq!(b, "b");
+        assert_eq!(c, "c");
+        assert_eq!(d, (2, 3));
     }
 }

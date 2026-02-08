@@ -271,9 +271,28 @@ impl Visitor {
         let direction = Direction::Input;
         let value = self.visit_value(inner, direction)?;
 
-        let mut node = NodeInstruct::new(Some(PIPELINE_RESULT_ID), "_");
-        node.inputs.insert("input".to_string(), value);
-        self.nodes.insert(PIPELINE_RESULT_ID.to_string(), node);
+        if let Some(node) = self.nodes.get_mut(PIPELINE_RESULT_ID) {
+            if let Some(existing_value) = node.inputs.get_mut("input") {
+                match existing_value {
+                    Value::Tuple { values, .. } => {
+                        values.push(value);
+                    }
+                    _ => {
+                        let old_value = existing_value.clone();
+                        *existing_value = Value::Tuple {
+                            direction,
+                            values: vec![old_value, value],
+                        };
+                    }
+                }
+            } else {
+                node.inputs.insert("input".to_string(), value);
+            }
+        } else {
+            let mut node = NodeInstruct::new(Some(PIPELINE_RESULT_ID), "_");
+            node.inputs.insert("input".to_string(), value);
+            self.nodes.insert(PIPELINE_RESULT_ID.to_string(), node);
+        }
 
         Ok(())
     }
