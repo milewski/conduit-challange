@@ -127,12 +127,12 @@ mod tests {
     #[test]
     fn test_custom_module_can_be_processed() {
         #[functional_node]
-        fn multiplier(a: u32, b: u32) -> u32 {
+        fn simple_multiplier(a: u32, b: u32) -> u32 {
             a * b
         }
 
         let output: u32 = pipeline! {r#"
-            <- multiplier {
+            <- simple_multiplier {
                 a <- 2
                 b <- 2
             }
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn test_nested_modules() {
         #[functional_node]
-        async fn multiplier(a: u32, b: u32) -> u32 {
+        async fn async_multiplier(a: u32, b: u32) -> u32 {
             a * b
         }
 
@@ -154,8 +154,8 @@ mod tests {
         }
 
         let output: u32 = pipeline! {r#"
-            <- multiplier {               # 4 * 2 = 8
-                a <- mul multiplier {     # 2 * 2 = 4
+            <- async_multiplier {               # 4 * 2 = 8
+                a <- mul async_multiplier {     # 2 * 2 = 4
                     a <- 2
                     b <- 2
                 }
@@ -202,13 +202,19 @@ mod tests {
         }
 
         #[functional_node]
-        async fn multiplier(a: u32, b: u32) -> u32 {
+        async fn multiplier(#[input] a: u32, b: u32) -> u32 {
             a * b
         }
 
-        let ((a, b), (c, d), (e, f)): ((u32, u32), (u32, u32), (u32, u32)) = pipeline!(
+        let ((a, b), (c, d), (e, f), (g, h)): ((u32, u32), (u32, u32), (u32, u32), (u32, u32)) = pipeline!(
             r#"
             # simpler version
+            number -> [
+                a multiplier { b <- 2 }
+                b multiplier { b <- 4 }
+            ]
+
+            # simpler version with explicity input attribute
             number -> [
                 c multiplier::a { b <- 2 }
                 d multiplier::a { b <- 4 }
@@ -216,27 +222,25 @@ mod tests {
 
             # the same but with an explicit output
             number::output -> [
-                a multiplier::a { b <- 2 }
-                b multiplier::a { b <- 4 }
+                e multiplier::a { b <- 2 }
+                f multiplier::a { b <- 4 }
             ]
 
             # verbose version
             number {
                 output -> [
-                    e multiplier::a { b <- 2 }
-                    f multiplier::a { b <- 4 }
+                    g multiplier::a { b <- 2 }
+                    h multiplier::a { b <- 4 }
                 ]
             }
 
-            <- ((a, b), (c, d), (e, f))
+            <- ((a, b), (c, d), (e, f), (g, h))
         "#
         );
 
-        assert_eq!(a, 10);
-        assert_eq!(b, 20);
-        assert_eq!(c, 10);
-        assert_eq!(d, 20);
-        assert_eq!(e, 10);
-        assert_eq!(f, 20);
+        assert_eq!((a, b), (10, 20));
+        assert_eq!((c, d), (10, 20));
+        assert_eq!((e, f), (10, 20));
+        assert_eq!((g, h), (10, 20));
     }
 }

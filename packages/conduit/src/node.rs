@@ -49,7 +49,7 @@ macro_rules! impl_from_shared_value_numeric {
                     if let Some(v) = value.downcast_ref::<i32>() {
                         return Ok(*v as $t);
                     }
-                    
+
                     Err(NodeError::TypeMismatch {
                         field: "result",
                         expected: concat!("numeric value for ", stringify!($t)),
@@ -77,7 +77,7 @@ macro_rules! impl_from_shared_value_float {
                     if let Some(v) = value.downcast_ref::<u32>() {
                         return Ok(*v as $t);
                     }
-                    
+
                     Err(NodeError::TypeMismatch {
                         field: "result",
                         expected: concat!("numeric value for ", stringify!($t)),

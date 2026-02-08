@@ -86,7 +86,7 @@ impl NodeOutput for DynamicInput {
     fn into_outputs(self) -> Vec<(&'static str, SharedValue)> {
         self.0
     }
-    
+
     fn field_names() -> Vec<&'static str> {
         Vec::new() // Not used by engine currently
     }

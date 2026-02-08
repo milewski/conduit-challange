@@ -98,7 +98,7 @@ impl Engine {
         // made available as outputs for expression references.
         // Note: modules named "_" are explicitly treated as data-only holders.
         // Skip the pipeline result node — it must be resolved after all execution.
-        
+
         // Phase 1: Resolve inputs first
         for (id, instruct) in &nodes {
             if instruct.module == "__input__" {
@@ -129,8 +129,10 @@ impl Engine {
 
             if instruct.module == "_" || !self.registry.has(&instruct.module) {
                 // If it's an input, we already handled it
-                if instruct.module == "__input__" { continue; }
-                
+                if instruct.module == "__input__" {
+                    continue;
+                }
+
                 outputs.insert(id.clone(), resolve_inputs(instruct, &outputs, &nodes, &input_names));
             }
         }
@@ -199,9 +201,7 @@ impl Engine {
             let unit: SharedValue = Arc::new(());
 
             T::from_shared_value(&unit).map_err(|_| {
-                 crate::node::NodeError::Custom(
-                    "No pipeline result defined (no `<- value` statement)".to_string(),
-                )
+                crate::node::NodeError::Custom("No pipeline result defined (no `<- value` statement)".to_string())
             })
         }
     }
@@ -509,11 +509,11 @@ fn resolve_single_value(
             } else if let Ok(f) = value.parse::<f64>() {
                 Arc::new(f) as SharedValue
             } else {
-                 // Fallback or error?
-                 // Parser grammar ensures it's a number, so it should parse as f64 at least.
-                 Arc::new(value.parse::<f64>().expect("valid number")) as SharedValue
+                // Fallback or error?
+                // Parser grammar ensures it's a number, so it should parse as f64 at least.
+                Arc::new(value.parse::<f64>().expect("valid number")) as SharedValue
             }
-        },
+        }
         Value::Expression { value: expr, .. } => {
             let result = evaluate_expression(expr, outputs, nodes, input_names);
             if result >= 0.0 && result <= u32::MAX as f64 {
@@ -524,9 +524,7 @@ fn resolve_single_value(
         }
         Value::Boolean { value, .. } => Arc::new(*value) as SharedValue,
         Value::Relation {
-            identifier,
-            property,
-            ..
+            identifier, property, ..
         } => resolve_reference(identifier, property, outputs, nodes, input_names),
         Value::Tuple { values, .. } => {
             let mut resolved = Vec::new();
@@ -609,12 +607,12 @@ fn resolve_reference(
         if let Some(value) = instruct.inputs.get(property) {
             return match value {
                 Value::Numeric { value, .. } => {
-                     if let Ok(i) = value.parse::<i128>() {
+                    if let Ok(i) = value.parse::<i128>() {
                         Arc::new(i as f64) // For expressions we still need f64 currently
                     } else {
                         Arc::new(value.parse::<f64>().unwrap())
                     }
-                },
+                }
                 Value::String { parts, .. } => {
                     // Reconstruct string value (no interpolation support in recursion yet? or assume literal?)
                     // If we are referencing a string from an expression, it likely shouldn't happen unless we support string ops.

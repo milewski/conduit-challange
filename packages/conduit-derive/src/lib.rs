@@ -10,9 +10,9 @@ fn extract_ok_type(ty: &syn::Type) -> Option<&syn::Type> {
             if segment.ident == "Result" {
                 if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
                     if !args.args.is_empty() {
-                         if let syn::GenericArgument::Type(inner) = &args.args[0] {
-                             return Some(inner);
-                         }
+                        if let syn::GenericArgument::Type(inner) = &args.args[0] {
+                            return Some(inner);
+                        }
                     }
                 }
             }
@@ -23,21 +23,49 @@ fn extract_ok_type(ty: &syn::Type) -> Option<&syn::Type> {
 
 #[proc_macro_attribute]
 pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input_fn = parse_macro_input!(item as ItemFn);
+    let mut input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
     let struct_name = fn_name; // Keep same name (lowercase)
     let struct_name_input = syn::Ident::new(&format!("{}Input", fn_name), fn_name.span());
 
-    let inputs: Vec<_> = input_fn.sig.inputs.iter().map(|arg| {
+    // Capture input aliases before filtering attributes
+    let mut input_mapping = std::collections::HashMap::new();
+    for arg in &input_fn.sig.inputs {
         if let syn::FnArg::Typed(pat_type) = arg {
             if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
-                let ident = &pat_ident.ident;
-                let ty = &pat_type.ty;
-                return quote! { #ident: #ty };
+                for attr in &pat_type.attrs {
+                    if attr.path().is_ident("input") {
+                        let name = pat_ident.ident.to_string();
+                        input_mapping.insert(name, "input".to_string());
+                        break;
+                    }
+                }
             }
         }
-        panic!("Unsupported argument type in node function");
-    }).collect();
+    }
+
+    // Filter out #[input] attribute from arguments to avoid compilation error in the generated function
+    for arg in &mut input_fn.sig.inputs {
+        if let syn::FnArg::Typed(pat_type) = arg {
+            pat_type.attrs.retain(|attr| !attr.path().is_ident("input"));
+        }
+    }
+
+    let inputs: Vec<_> = input_fn
+        .sig
+        .inputs
+        .iter()
+        .map(|arg| {
+            if let syn::FnArg::Typed(pat_type) = arg {
+                if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                    let ident = &pat_ident.ident;
+                    let ty = &pat_type.ty;
+                    return quote! { #ident: #ty };
+                }
+            }
+            panic!("Unsupported argument type in node function");
+        })
+        .collect();
 
     let input_fields_extract = input_fn.sig.inputs.iter().map(|arg| {
         if let syn::FnArg::Typed(pat_type) = arg {
@@ -45,12 +73,25 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let ident = &pat_ident.ident;
                 let ident_str = ident.to_string();
                 let ty = &pat_type.ty;
-                return quote! {
-                    #ident: payload
-                        .get(#ident_str)
-                        .ok_or(conduit::node::NodeError::MissingInput(#ident_str))
-                        .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
-                };
+
+                let is_input = input_mapping.get(&ident_str).is_some();
+
+                if is_input {
+                    return quote! {
+                        #ident: payload
+                            .get("input")
+                            .or_else(|| payload.get(#ident_str))
+                            .ok_or(conduit::node::NodeError::MissingInput("input or explicit field"))
+                            .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
+                    };
+                } else {
+                    return quote! {
+                        #ident: payload
+                            .get(#ident_str)
+                            .ok_or(conduit::node::NodeError::MissingInput(#ident_str))
+                            .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
+                    };
+                }
             }
         }
         panic!("Unsupported argument type");
@@ -58,10 +99,15 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let input_field_names = input_fn.sig.inputs.iter().map(|arg| {
         if let syn::FnArg::Typed(pat_type) = arg {
-             if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+            if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
                 let ident_str = pat_ident.ident.to_string();
-                return quote! { #ident_str };
-             }
+                let is_input = input_mapping.get(&ident_str).is_some();
+                if is_input {
+                    return quote! { #ident_str, "input" };
+                } else {
+                    return quote! { #ident_str };
+                }
+            }
         }
         panic!("Unsupported argument type");
     });
@@ -77,7 +123,7 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
     });
 
     let body = &input_fn.block;
-    
+
     let (output_ty, is_result) = match &input_fn.sig.output {
         syn::ReturnType::Default => (quote! { () }, false),
         syn::ReturnType::Type(_, ty) => {
@@ -86,7 +132,7 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
             } else {
                 (quote! { #ty }, false)
             }
-        },
+        }
     };
 
     let run_impl = if is_result {
@@ -175,7 +221,6 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     TokenStream::from(expanded)
 }
-
 
 #[proc_macro_derive(NodeInput)]
 pub fn derive_node_input(input: TokenStream) -> TokenStream {

@@ -323,22 +323,19 @@ impl Visitor {
                         Rule::interpolation => {
                             let inner_pair = inner.into_inner().next().unwrap();
                             let inner_str = inner_pair.as_str();
-                            
+
                             let mut pairs = Schema::parse(Rule::interpolation_expression, inner_str)
                                 .map_err(|e| ParserError::from(e))?;
-                            
+
                             let expression_pair = pairs.next().unwrap().into_inner().next().unwrap();
                             let expression = self.visit_expression(expression_pair.into_inner())?;
-                            
+
                             parts.push(StringPart::Interpolation(expression));
                         }
                         _ => unreachable!("Unexpected rule in string: {:?}", inner.as_rule()),
                     }
                 }
-                Ok(Value::String {
-                    direction,
-                    parts,
-                })
+                Ok(Value::String { direction, parts })
             }
             Rule::boolean => Ok(Value::Boolean {
                 direction,
@@ -477,12 +474,7 @@ impl Visitor {
             }
             Value::Tuple { values, .. } => {
                 for value in values {
-                    Self::collect_relations(
-                        source_identifier.clone(),
-                        source_property.clone(),
-                        value,
-                        updates,
-                    );
+                    Self::collect_relations(source_identifier.clone(), source_property.clone(), value, updates);
                 }
             }
             _ => {}
@@ -745,9 +737,7 @@ mod tests {
     }
     #[test]
     fn test_string_interpolation_parsing_simple() {
-        assert_parser_snapshot!(
-            r#"node m { s <- "Hello { config::name }!" }"#,
-        );
+        assert_parser_snapshot!(r#"node m { s <- "Hello { config::name }!" }"#,);
     }
 }
 

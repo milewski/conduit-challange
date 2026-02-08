@@ -6,8 +6,8 @@ pub mod dsl;
 pub mod ecs;
 pub mod node;
 pub mod registry;
-pub mod traits;
 mod test;
+pub mod traits;
 
 pub use crate::ecs::Engine;
 pub use crate::node::{FromSharedValue, SharedValue};
