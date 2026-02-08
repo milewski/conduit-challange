@@ -7,8 +7,8 @@
 - **Use descriptive variable names.** Never use single-letter identifiers. Names should convey purpose clearly.
   - **Avoid:** `map_err(|e| e...)`
   - **Prefer:** `map_err(|error| error...)` or other descriptive names.
-  - **Avoid:** `args, expr, err, ref, res, str`
-  - **Prefer:** `arguments, expression, error, reference, response, string`
+  - **Avoid:** `args, expr, err, ref, res, str, val`
+  - **Prefer:** `arguments, expression, error, reference, response, string, value`
 
 - **Improve existing code.** When encountering misspelled or single-letter variables in source code, refactor them to use clear, descriptive names.
 

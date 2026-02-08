@@ -10,6 +10,7 @@ pub struct Resizer;
 
 #[derive(NodeInput)]
 pub struct ResizerInput {
+    #[input]
     pub source: Vec<u8>,
     pub width: u32,
     pub height: u32,

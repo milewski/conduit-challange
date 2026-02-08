@@ -144,23 +144,23 @@ mod tests {
     #[test]
     fn test_nested_modules() {
         #[functional_node]
-        async fn async_multiplier(a: u32, b: u32) -> u32 {
+        fn multiplier(a: u32, b: u32) -> u32 {
             a * b
         }
 
         #[functional_node]
-        async fn subtract(a: u32, b: u32) -> u32 {
+        fn subtract(a: u32, b: u32) -> u32 {
             a - b
         }
 
         let output: u32 = pipeline! {r#"
-            <- async_multiplier {               # 4 * 2 = 8
-                a <- mul async_multiplier {     # 2 * 2 = 4
+            <- multiplier {               # 4 * 2 = 8
+                a <- m multiplier {       # 2 * 2 = 4
                     a <- 2
                     b <- 2
                 }
-                b <- sub subtract {       # 4 - 2 = 2
-                    a <- mul
+                b <- subtract {           # 4 - 2 = 2
+                    a <- m
                     b <- 2
                 }
             }
@@ -170,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn test_async_and_result_module() {
+    fn test_async_module() {
         #[functional_node]
         async fn async_checked_divide(dividend: u32, divisor: u32) -> Result<u32, String> {
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -240,5 +240,47 @@ mod tests {
         assert_eq!((c, d), (10, 20));
         assert_eq!((e, f), (10, 20));
         assert_eq!((g, h), (10, 20));
+    }
+
+    #[test]
+    fn test_implicit_input_output_syntax() {
+        #[functional_node]
+        fn simple_math(#[input] value: u32, operand: u32) -> u32 {
+            value + operand
+        }
+
+        let output: (u32, u32) = pipeline! {r#"
+            <- simple_math {
+                <- 10
+                operand <- 5
+            }
+
+            <- simple_math {
+                value <- 5
+                operand <- 5
+            }
+        "#};
+
+        assert_eq!(output, (15, 10));
+    }
+
+    #[test]
+    fn test_implicit_output_chaining() {
+        #[functional_node]
+        fn producer() -> u32 {
+            10
+        }
+        
+        #[functional_node]
+        fn consumer(#[input] value: u32) -> u32 {
+            value * 2
+        }
+
+        let output: u32 = pipeline! {r#"
+            p producer { -> c consumer {} }
+            <- c
+        "#};
+        
+        assert_eq!(output, 20);
     }
 }

@@ -7,7 +7,7 @@ anonymous_node = { module ~ (shorthand | body) }
 shorthand = { direction ~ value }
 
 body = { "{" ~ NEWLINE* ~ (parameter ~ NEWLINE*)* ~ "}" }
-parameter = { property ~ direction ~ value }
+parameter = { property? ~ direction ~ value }
 
 string = ${ "\"" ~ (interpolation | string_content)* ~ "\"" }
 string_content = @{ char+ }

@@ -219,22 +219,38 @@ impl Visitor {
 
             let mut pairs = pair.into_inner();
 
-            let (property, direction, value) = (
-                pairs.next().unwrap_or_else(|| unreachable!()),
-                pairs.next().unwrap_or_else(|| unreachable!()),
-                pairs.next().unwrap_or_else(|| unreachable!()),
-            );
+            let first = pairs.next().unwrap_or_else(|| unreachable!());
+            
+            let (property_name, direction_pair, value_pair) = if first.as_rule() == Rule::property {
+                let direction = pairs.next().unwrap_or_else(|| unreachable!());
+                let value = pairs.next().unwrap_or_else(|| unreachable!());
+                (first.as_str().to_string(), direction, value)
+            } else if first.as_rule() == Rule::direction {
+                let direction = first;
+                let value = pairs.next().unwrap_or_else(|| unreachable!());
+                
+                // We need to parse direction enum here to decide default property name
+                // Note: We can reuse the existing From implementation logic or check raw string
+                let dir_str = direction.as_str();
+                let prop_name = match dir_str {
+                     "<-" => "input".to_string(),
+                     "->" => "output".to_string(),
+                     _ => unreachable!(),
+                };
+                (prop_name, direction, value)
+            } else {
+                unreachable!("Unexpected rule in parameter: {:?}", first.as_rule());
+            };
 
-            assert_eq!(property.as_rule(), Rule::property);
-            assert_eq!(direction.as_rule(), Rule::direction);
-            assert_eq!(value.as_rule(), Rule::value);
+            assert_eq!(direction_pair.as_rule(), Rule::direction);
+            assert_eq!(value_pair.as_rule(), Rule::value);
 
-            let inner = value.into_inner().next().unwrap_or_else(|| unreachable!());
-            let direction: Direction = direction.into();
+            let inner = value_pair.into_inner().next().unwrap_or_else(|| unreachable!());
+            let direction: Direction = direction_pair.into();
 
             let value = self.visit_value(inner, direction)?;
 
-            node.inputs.insert(property.as_str().to_string(), value);
+            node.inputs.insert(property_name, value);
         }
 
         Ok(())
@@ -738,6 +754,19 @@ mod tests {
     #[test]
     fn test_string_interpolation_parsing_simple() {
         assert_parser_snapshot!(r#"node m { s <- "Hello { config::name }!" }"#,);
+    }
+
+    #[test]
+    fn test_implicit_property_assignment() {
+        assert_parser_snapshot!(
+            r#"
+                name module {
+                    <- "implicit input"
+                    -> "implicit output"
+                    other <- 123
+                }
+            "#,
+        );
     }
 }
 

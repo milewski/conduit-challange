@@ -1,0 +1,35 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+assertion_line: 761
+expression: nodes
+---
+Ok(
+    {
+        "name": NodeInstruct {
+            identifier: "name",
+            module: "module",
+            inputs: {
+                "input": String {
+                    direction: Input,
+                    parts: [
+                        Literal(
+                            "implicit input",
+                        ),
+                    ],
+                },
+                "other": Numeric {
+                    direction: Input,
+                    value: "123",
+                },
+                "output": String {
+                    direction: Output,
+                    parts: [
+                        Literal(
+                            "implicit output",
+                        ),
+                    ],
+                },
+            },
+        },
+    },
+)

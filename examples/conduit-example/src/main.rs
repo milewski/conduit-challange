@@ -22,10 +22,10 @@ fn main() {
         metadata metadata <- source read_file <- "./examples/conduit-example/cover.png"
 
         <- resizer {
-            source <- source
+            <- source
             width <- (width / 2)
             height <- (height / 2)
-            output -> write_file {
+            -> write_file {
                 destination <- "./examples/conduit-example/cover.{ metadata::name }.png"
             }
         }

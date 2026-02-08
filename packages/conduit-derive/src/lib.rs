@@ -222,7 +222,7 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-#[proc_macro_derive(NodeInput)]
+#[proc_macro_derive(NodeInput, attributes(input))]
 pub fn derive_node_input(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
@@ -240,17 +240,35 @@ pub fn derive_node_input(input: TokenStream) -> TokenStream {
         let field_name_str = field_name.to_string();
         let ty = &field.ty;
 
-        quote! {
-            #field_name: payload
-                .get(#field_name_str)
-                .ok_or(conduit::node::NodeError::MissingInput(#field_name_str))
-                .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
+        let has_input_attr = field.attrs.iter().any(|attr| attr.path().is_ident("input"));
+
+        if has_input_attr {
+            quote! {
+                #field_name: payload
+                    .get("input")
+                    .or_else(|| payload.get(#field_name_str))
+                    .ok_or(conduit::node::NodeError::MissingInput("input or explicit field"))
+                    .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
+            }
+        } else {
+            quote! {
+                #field_name: payload
+                    .get(#field_name_str)
+                    .ok_or(conduit::node::NodeError::MissingInput(#field_name_str))
+                    .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
+            }
         }
     });
 
     let field_names = fields.named.iter().map(|field| {
         let field_name_str = field.ident.as_ref().unwrap().to_string();
-        quote! { #field_name_str }
+        let has_input_attr = field.attrs.iter().any(|attr| attr.path().is_ident("input"));
+        
+        if has_input_attr {
+             quote! { #field_name_str, "input" }
+        } else {
+             quote! { #field_name_str }
+        }
     });
 
     let expanded = quote! {
