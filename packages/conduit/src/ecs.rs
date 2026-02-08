@@ -81,7 +81,7 @@ impl Engine {
 
         let has_result = nodes.contains_key(PIPELINE_RESULT_ID);
 
-        let (graph, _index_map) = build_dependency_graph(&nodes);
+        let (graph, _) = build_dependency_graph(&nodes);
         let levels = compute_execution_levels(&graph);
 
         let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
@@ -90,7 +90,7 @@ impl Engine {
         let runtime_inputs_vec = input.into_outputs();
         let runtime_inputs: HashMap<String, SharedValue> = runtime_inputs_vec
             .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
+            .map(|(key, value)| (key.to_string(), value))
             .collect();
 
         // Pre-populate outputs from data-only nodes (ignored modules or unregistered for legacy support).
@@ -107,10 +107,10 @@ impl Engine {
 
                 // The original input name is extracted from the node name (removing __input_ prefix)
                 let name = id.strip_prefix("__input_").unwrap();
-                let value = if let Some(v) = runtime_inputs.get(name) {
-                    v.clone()
-                } else if let Some(v) = default_value {
-                    v
+                let value = if let Some(value) = runtime_inputs.get(name) {
+                    value.clone()
+                } else if let Some(value) = default_value {
+                    value
                 } else {
                     panic!("Missing input '{}'", name);
                 };
@@ -221,61 +221,37 @@ fn build_dependency_graph(
     }
 
     for (id, instruct) in nodes {
-        for (prop, value) in &instruct.inputs {
+        for (property, value) in &instruct.inputs {
             match value {
                 Value::Relation {
-                    identifier: dep_id,
+                    identifier,
                     property,
                     direction,
                 } => match direction {
                     Direction::Input => {
-                        let dep_idx = index_map
-                            .get(dep_id)
-                            .or_else(|| index_map.get(&format!("__input_{}", dep_id)));
-
-                        if let (Some(&from), Some(&to)) = (dep_idx, index_map.get(id)) {
-                            graph.add_edge(from, to, property.clone());
-                        }
+                        add_dependency_edge(&mut graph, &index_map, identifier, id, property);
                     }
                     Direction::Output => {
-                        let dep_idx = index_map
-                            .get(dep_id)
-                            .or_else(|| index_map.get(&format!("__input_{}", dep_id)));
-
-                        if let (Some(&from), Some(&to)) = (index_map.get(id), dep_idx) {
-                            graph.add_edge(from, to, prop.clone());
-                        }
+                        add_dependency_edge(&mut graph, &index_map, id, identifier, property);
                     }
                 },
                 Value::String { parts, .. } => {
                     for part in parts {
-                        if let StringPart::Interpolation(expr) = part {
-                            for (ref_id, _) in collect_expression_references(expr) {
-                                let ref_idx = index_map
-                                    .get(ref_id)
-                                    .or_else(|| index_map.get(&format!("__input_{}", ref_id)));
-
-                                if let (Some(&from), Some(&to)) = (ref_idx, index_map.get(id)) {
-                                    graph.add_edge(from, to, prop.clone());
-                                }
+                        if let StringPart::Interpolation(expression) = part {
+                            for (reference_id, _) in collect_expression_references(expression) {
+                                add_dependency_edge(&mut graph, &index_map, reference_id, id, property);
                             }
                         }
                     }
                 }
-                Value::Expression { value: expr, .. } => {
-                    for (ref_id, _) in collect_expression_references(expr) {
-                        let ref_idx = index_map
-                            .get(ref_id)
-                            .or_else(|| index_map.get(&format!("__input_{}", ref_id)));
-
-                        if let (Some(&from), Some(&to)) = (ref_idx, index_map.get(id)) {
-                            graph.add_edge(from, to, prop.clone());
-                        }
+                Value::Expression { value, .. } => {
+                    for (reference_id, _) in collect_expression_references(value) {
+                        add_dependency_edge(&mut graph, &index_map, reference_id, id, property);
                     }
                 }
                 Value::Tuple { values, .. } => {
-                    for val in values {
-                        collect_tuple_references(val, id, prop, &index_map, &mut graph);
+                    for value in values {
+                        collect_tuple_references(value, id, property, &index_map, &mut graph);
                     }
                 }
                 _ => {}
@@ -286,67 +262,115 @@ fn build_dependency_graph(
     (graph, index_map)
 }
 
+fn add_dependency_edge(
+    graph: &mut DiGraph<Identifier, String>,
+    index_map: &HashMap<Identifier, NodeIndex>,
+    from_id: &str,
+    to_id: &str,
+    property: &str,
+) {
+    let dependency_index = index_map
+        .get(from_id)
+        .or_else(|| index_map.get(&format!("__input_{}", from_id)));
+
+    if let (Some(&from), Some(&to)) = (dependency_index, index_map.get(to_id)) {
+        graph.add_edge(from, to, property.to_string());
+    }
+}
+
+fn resolve_input_fallback(
+    identifier: &str,
+    outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
+) -> Option<SharedValue> {
+    let input_node_id = format!("__input_{}", identifier);
+
+    if let Some(dependency_outputs) = outputs.get(&input_node_id) {
+        dependency_outputs.get("output").cloned()
+    } else {
+        None
+    }
+}
+
+fn evaluate_string_interpolation(
+    expression: &Expression,
+    outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
+    nodes: &BTreeMap<Identifier, NodeInstruct>,
+    input_names: &std::collections::HashSet<String>,
+) -> String {
+    match expression {
+        Expression::Reference { identifier, property } => {
+            shared_value_to_string(&resolve_reference(identifier, property, outputs, nodes, input_names))
+        }
+        _ => evaluate_expression(expression, outputs, nodes, input_names).to_string(),
+    }
+}
+
+fn resolve_string_parts(
+    parts: &[StringPart],
+    outputs: &HashMap<Identifier, HashMap<String, SharedValue>>,
+    nodes: &BTreeMap<Identifier, NodeInstruct>,
+    input_names: &std::collections::HashSet<String>,
+) -> SharedValue {
+    let mut result = String::new();
+
+    for part in parts {
+        match part {
+            StringPart::Literal(string) => result.push_str(string),
+            StringPart::Interpolation(expression) => {
+                result.push_str(&evaluate_string_interpolation(expression, outputs, nodes, input_names));
+            }
+        }
+    }
+
+    Arc::new(result)
+}
+
+fn is_input_direction(value: &Value) -> bool {
+    match value {
+        Value::String { direction, .. }
+        | Value::Numeric { direction, .. }
+        | Value::Boolean { direction, .. }
+        | Value::Expression { direction, .. }
+        | Value::Relation { direction, .. }
+        | Value::Tuple { direction, .. } => *direction == Direction::Input,
+    }
+}
+
 fn collect_tuple_references(
     value: &Value,
     id: &str,
-    prop: &str,
+    property: &str,
     index_map: &HashMap<Identifier, NodeIndex>,
     graph: &mut DiGraph<Identifier, String>,
 ) {
     match value {
         Value::Relation {
-            identifier: dep_id,
-            property: _,
-            direction,
+            identifier, direction, ..
         } => match direction {
             Direction::Input => {
-                let dep_idx = index_map
-                    .get(dep_id)
-                    .or_else(|| index_map.get(&format!("__input_{}", dep_id)));
-
-                if let (Some(&from), Some(&to)) = (dep_idx, index_map.get(id)) {
-                    graph.add_edge(from, to, prop.to_string());
-                }
+                add_dependency_edge(graph, index_map, identifier, id, property);
             }
             Direction::Output => {
-                let dep_idx = index_map
-                    .get(dep_id)
-                    .or_else(|| index_map.get(&format!("__input_{}", dep_id)));
-
-                if let (Some(&from), Some(&to)) = (index_map.get(id), dep_idx) {
-                    graph.add_edge(from, to, prop.to_string());
-                }
+                add_dependency_edge(graph, index_map, id, identifier, property);
             }
         },
-        Value::Expression { value: expr, .. } => {
-            for (ref_id, _) in collect_expression_references(expr) {
-                let ref_idx = index_map
-                    .get(ref_id)
-                    .or_else(|| index_map.get(&format!("__input_{}", ref_id)));
-
-                if let (Some(&from), Some(&to)) = (ref_idx, index_map.get(id)) {
-                    graph.add_edge(from, to, prop.to_string());
-                }
+        Value::Expression { value, .. } => {
+            for (reference_id, _) in collect_expression_references(value) {
+                add_dependency_edge(graph, index_map, reference_id, id, property);
             }
         }
         Value::String { parts, .. } => {
             for part in parts {
-                if let StringPart::Interpolation(expr) = part {
-                    for (ref_id, _) in collect_expression_references(expr) {
-                        let ref_idx = index_map
-                            .get(ref_id)
-                            .or_else(|| index_map.get(&format!("__input_{}", ref_id)));
-
-                        if let (Some(&from), Some(&to)) = (ref_idx, index_map.get(id)) {
-                            graph.add_edge(from, to, prop.to_string());
-                        }
+                if let StringPart::Interpolation(expression) = part {
+                    for (reference_id, _) in collect_expression_references(expression) {
+                        add_dependency_edge(graph, index_map, reference_id, id, property);
                     }
                 }
             }
         }
         Value::Tuple { values, .. } => {
-            for val in values {
-                collect_tuple_references(val, id, prop, index_map, graph);
+            for value in values {
+                collect_tuple_references(value, id, property, index_map, graph);
             }
         }
         _ => {}
@@ -360,9 +384,9 @@ fn compute_execution_levels(graph: &DiGraph<Identifier, String>) -> Vec<Vec<Node
 
     let mut node_levels: HashMap<NodeIndex, usize> = HashMap::new();
 
-    for &idx in &topo {
+    for &index in &topo {
         let max_dep_level = graph
-            .neighbors_directed(idx, GraphDirection::Incoming)
+            .neighbors_directed(index, GraphDirection::Incoming)
             .filter_map(|dep| node_levels.get(&dep).copied())
             .max();
 
@@ -371,14 +395,14 @@ fn compute_execution_levels(graph: &DiGraph<Identifier, String>) -> Vec<Vec<Node
             None => 0,
         };
 
-        node_levels.insert(idx, level);
+        node_levels.insert(index, level);
     }
 
     let max_level = node_levels.values().max().copied().unwrap_or(0);
     let mut levels = vec![Vec::new(); max_level + 1];
 
-    for &idx in &topo {
-        levels[node_levels[&idx]].push(idx);
+    for &index in &topo {
+        levels[node_levels[&index]].push(index);
     }
 
     levels
@@ -394,82 +418,8 @@ fn resolve_inputs(
     let mut payload = HashMap::new();
 
     for (name, value) in &instruct.inputs {
-        match value {
-            Value::String { parts, direction, .. } if *direction == Direction::Input => {
-                let mut result = String::new();
-                for part in parts {
-                    match part {
-                        StringPart::Literal(s) => result.push_str(s),
-                        StringPart::Interpolation(expr) => match expr {
-                            Expression::Reference { identifier, property } => {
-                                let val = resolve_reference(identifier, property, outputs, nodes, input_names);
-                                result.push_str(&shared_value_to_string(&val));
-                            }
-                            _ => {
-                                let val = evaluate_expression(expr, outputs, nodes, input_names);
-                                result.push_str(&val.to_string());
-                            }
-                        },
-                    }
-                }
-                payload.insert(name.clone(), Arc::new(result) as SharedValue);
-            }
-            Value::Numeric { value, direction, .. } if *direction == Direction::Input => {
-                if let Ok(i) = value.parse::<i128>() {
-                    payload.insert(name.clone(), Arc::new(i) as SharedValue);
-                } else {
-                    let f = value.parse::<f64>().expect("valid number");
-                    payload.insert(name.clone(), Arc::new(f) as SharedValue);
-                }
-            }
-            Value::Expression { value: expr, direction } if *direction == Direction::Input => {
-                let result = evaluate_expression(expr, outputs, nodes, input_names);
-                if result >= 0.0 && result <= u32::MAX as f64 {
-                    payload.insert(name.clone(), Arc::new(result as u32) as SharedValue);
-                } else {
-                    payload.insert(name.clone(), Arc::new(result) as SharedValue);
-                }
-            }
-            Value::Boolean { value, direction, .. } if *direction == Direction::Input => {
-                payload.insert(name.clone(), Arc::new(*value) as SharedValue);
-            }
-            Value::Relation {
-                identifier,
-                property,
-                direction,
-            } if *direction == Direction::Input => {
-                if let Some(dep_outputs) = outputs.get(identifier) {
-                    if let Some(val) = dep_outputs.get(property) {
-                        payload.insert(name.clone(), val.clone());
-                    } else if property == "output" && input_names.contains(identifier) {
-                        // Fallback to global input if property is output (or implied)
-                        // And identifier is an input name
-                        let input_node_id = format!("__input_{}", identifier);
-                        if let Some(dep_outputs) = outputs.get(&input_node_id) {
-                            if let Some(val) = dep_outputs.get("output") {
-                                payload.insert(name.clone(), val.clone());
-                            }
-                        }
-                    }
-                } else if input_names.contains(identifier) {
-                    // Not found in outputs (maybe didn't run yet? or not a node?)
-                    // If it is an input, check the input node output
-                    let input_node_id = format!("__input_{}", identifier);
-                    if let Some(dep_outputs) = outputs.get(&input_node_id) {
-                        if let Some(val) = dep_outputs.get("output") {
-                            payload.insert(name.clone(), val.clone());
-                        }
-                    }
-                }
-            }
-            Value::Tuple { values, direction } if *direction == Direction::Input => {
-                let mut resolved = Vec::new();
-                for val in values {
-                    resolved.push(resolve_single_value(val, outputs, nodes, input_names));
-                }
-                payload.insert(name.clone(), Arc::new(resolved) as SharedValue);
-            }
-            _ => {}
+        if is_input_direction(value) {
+            payload.insert(name.clone(), resolve_single_value(value, outputs, nodes, input_names));
         }
     }
 
@@ -483,25 +433,7 @@ fn resolve_single_value(
     input_names: &std::collections::HashSet<String>,
 ) -> SharedValue {
     match value {
-        Value::String { parts, .. } => {
-            let mut result = String::new();
-            for part in parts {
-                match part {
-                    StringPart::Literal(s) => result.push_str(s),
-                    StringPart::Interpolation(expr) => match expr {
-                        Expression::Reference { identifier, property } => {
-                            let val = resolve_reference(identifier, property, outputs, nodes, input_names);
-                            result.push_str(&shared_value_to_string(&val));
-                        }
-                        _ => {
-                            let val = evaluate_expression(expr, outputs, nodes, input_names);
-                            result.push_str(&val.to_string());
-                        }
-                    },
-                }
-            }
-            Arc::new(result) as SharedValue
-        }
+        Value::String { parts, .. } => resolve_string_parts(parts, outputs, nodes, input_names),
         Value::Numeric { value, .. } => {
             // Try parsing as integer (i128) then float (f64)
             if let Ok(i) = value.parse::<i128>() {
@@ -514,8 +446,9 @@ fn resolve_single_value(
                 Arc::new(value.parse::<f64>().expect("valid number")) as SharedValue
             }
         }
-        Value::Expression { value: expr, .. } => {
-            let result = evaluate_expression(expr, outputs, nodes, input_names);
+        Value::Expression { value, .. } => {
+            let result = evaluate_expression(value, outputs, nodes, input_names);
+
             if result >= 0.0 && result <= u32::MAX as f64 {
                 Arc::new(result as u32) as SharedValue
             } else {
@@ -528,9 +461,11 @@ fn resolve_single_value(
         } => resolve_reference(identifier, property, outputs, nodes, input_names),
         Value::Tuple { values, .. } => {
             let mut resolved = Vec::new();
-            for val in values {
-                resolved.push(resolve_single_value(val, outputs, nodes, input_names));
+
+            for value in values {
+                resolved.push(resolve_single_value(value, outputs, nodes, input_names));
             }
+
             Arc::new(resolved) as SharedValue
         }
     }
@@ -560,8 +495,7 @@ fn evaluate_expression(
     match expression {
         Expression::Number(value) => value.parse::<f64>().unwrap(),
         Expression::Reference { identifier, property } => {
-            let value = resolve_reference(identifier, property, outputs, nodes, input_names);
-            shared_value_to_f64(&value)
+            shared_value_to_f64(&resolve_reference(identifier, property, outputs, nodes, input_names))
         }
         Expression::BinaryOperation { operation, left, right } => {
             let left = evaluate_expression(left, outputs, nodes, input_names);
@@ -586,19 +520,16 @@ fn resolve_reference(
     input_names: &std::collections::HashSet<String>,
 ) -> SharedValue {
     // Try resolved outputs first (from executed nodes)
-    if let Some(dep_outputs) = outputs.get(identifier) {
-        if let Some(value) = dep_outputs.get(property) {
+    if let Some(dependency_outputs) = outputs.get(identifier) {
+        if let Some(value) = dependency_outputs.get(property) {
             return value.clone();
         }
     }
 
     // Try global input fallback if property is default "output" or "input" (depending on how it was parsed)
     if property == "output" && input_names.contains(identifier) {
-        let input_node_id = format!("__input_{}", identifier);
-        if let Some(dep_outputs) = outputs.get(&input_node_id) {
-            if let Some(value) = dep_outputs.get("output") {
-                return value.clone();
-            }
+        if let Some(value) = resolve_input_fallback(identifier, outputs) {
+            return value;
         }
     }
 
@@ -608,60 +539,27 @@ fn resolve_reference(
             return match value {
                 Value::Numeric { value, .. } => {
                     if let Ok(i) = value.parse::<i128>() {
-                        Arc::new(i as f64) // For expressions we still need f64 currently
+                        Arc::new(i as f64) // For expressions, we still need f64 currently
                     } else {
                         Arc::new(value.parse::<f64>().unwrap())
                     }
                 }
-                Value::String { parts, .. } => {
-                    // Reconstruct string value (no interpolation support in recursion yet? or assume literal?)
-                    // If we are referencing a string from an expression, it likely shouldn't happen unless we support string ops.
-                    // But if we are just resolving it, we can return it.
-                    // CAUTION: If the referenced string HAS interpolation, we should evaluate it.
-                    // But evaluate_expression returns f64. This path is called from resolve_reference.
-                    // We can recursively call resolve_inputs logic? But resolve_inputs is for a whole node.
-
-                    // Simplify: Assume referenced string literals in data-only nodes are just literals for now
-                    // OR implement simple evaluation.
-                    let mut result = String::new();
-                    for part in parts {
-                        match part {
-                            StringPart::Literal(s) => result.push_str(s),
-                            StringPart::Interpolation(expr) => {
-                                // Recurse
-                                // But wait, if we are in resolve_reference, we might cause infinite loop if cycle?
-                                // DAG check handles cycles.
-                                match expr {
-                                    Expression::Reference { identifier, property } => {
-                                        let val = resolve_reference(identifier, property, outputs, nodes, input_names);
-                                        result.push_str(&shared_value_to_string(&val));
-                                    }
-                                    _ => {
-                                        let val = evaluate_expression(expr, outputs, nodes, input_names);
-                                        result.push_str(&val.to_string());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Arc::new(result)
-                }
+                Value::String { parts, .. } => resolve_string_parts(parts, outputs, nodes, input_names),
                 Value::Boolean { value, .. } => Arc::new(*value),
-                Value::Expression { value: inner, .. } => {
-                    Arc::new(evaluate_expression(inner, outputs, nodes, input_names))
-                }
+                Value::Expression { value, .. } => Arc::new(evaluate_expression(value, outputs, nodes, input_names)),
                 _ => panic!("Reference '{}::{}' type not supported", identifier, property),
             };
         }
     }
+
     panic!("Cannot resolve '{}::{}'", identifier, property);
 }
 
 fn shared_value_to_string(value: &SharedValue) -> String {
-    if let Some(v) = value.downcast_ref::<String>() {
-        v.clone()
-    } else if let Some(v) = value.downcast_ref::<&str>() {
-        v.to_string()
+    if let Some(value) = value.downcast_ref::<String>() {
+        value.clone()
+    } else if let Some(value) = value.downcast_ref::<&str>() {
+        value.to_string()
     } else {
         shared_value_to_f64(value).to_string()
     }
