@@ -4,13 +4,13 @@ mod tests {
 
     #[test]
     fn test_input_output() {
-        let input = input! { name: "example" };
+        let input = input! { name: "rafael" };
         let output: String = pipeline! {input, r#"
             -> name
             <- name
         "#};
 
-        assert_eq!(output, "example");
+        assert_eq!(output, "rafael");
     }
 
     #[test]
@@ -37,7 +37,9 @@ mod tests {
 
     #[test]
     fn test_tuple_nested() {
-        let (a, (b, c)): (u32, (u32, u32)) = pipeline! { "<- (1, (2, 3))" };
+        let (a, (b, c)): (u32, (u32, u32)) = pipeline! { r#"
+            <- (1, (2, 3))
+        "# };
 
         assert_eq!(a, 1);
         assert_eq!(b, 2);
@@ -54,15 +56,67 @@ mod tests {
     }
 
     #[test]
-    fn test_expressions() {
-        let (a, b,): (u32, u32) = pipeline! {r#"
-            <- (
-                (1 + 2 * 3),
-                (1 + 2 * 3),
-            )
+    fn test_tuple_with_expressions() {
+        let (a, b): (u8, String) = pipeline! {r#"
+            <- ((1 + (2 * 3)), "result is: { (1 + 2 * 3) }")
         "#};
 
         assert_eq!(a, 7);
-        assert_eq!(b, 7);
+        assert_eq!(b, "result is: 7");
+    }
+
+    #[test]
+    fn test_interpolation_string_ref() {
+        let input = input! { name: "world" };
+        let output: String = pipeline! {input, r#"
+            -> name
+            <- "hello { name }"
+        "#};
+
+        assert_eq!(output, "hello world");
+    }
+
+    #[test]
+    fn test_interpolation_expression() {
+        let input = input! { width: 10 };
+        let output: String = pipeline! {input, r#"
+            -> width
+            <- "width is { (width + 5) }"
+        "#};
+
+        assert_eq!(output, "width is 15");
+    }
+
+    #[test]
+    fn test_string_literal_value() {
+        let output: String = pipeline! {r#"
+            <- "just a string"
+        "#};
+
+        assert_eq!(output, "just a string");
+    }
+
+    #[test]
+    fn test_output_using_module_output() {
+        let (a, b, c): (String, String, String) = pipeline! {r#"
+            explicity _ { a <- "a" }
+            implicity _ { output <- "b" }
+            <- ( explicity::a, implicity, "{ explicity::a }__{ implicity }" )
+        "#};
+
+        assert_eq!(a, "a");
+        assert_eq!(b, "b");
+        assert_eq!(c, "a__b");
+    }
+
+    #[test]
+    fn test_tuple_returns_can_also_be_expressed_as_multiple_returns() {
+        let (a, b): (String, String) = pipeline! {r#"
+            <- a _::a { a <- "a" }
+            <- b _ { output <- "b" }
+        "#};
+
+        assert_eq!(a, "a");
+        assert_eq!(b, "b");
     }
 }

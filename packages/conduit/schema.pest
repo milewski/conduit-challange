@@ -31,7 +31,7 @@ number = @{
 
 boolean = { "true" | "false" }
 relation = { identifier ~ "::" ~ property }
-tuple = { "(" ~ value ~ ("," ~ value)+ ~ ")" }
+tuple = { "(" ~ NEWLINE* ~ value ~ ("," ~ NEWLINE* ~ value)+ ~ ","? ~ NEWLINE* ~ ")" }
 
 value = { string | boolean | tuple | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier }
 

@@ -129,6 +129,12 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for NodeError {
     }
 }
 
+impl From<std::io::Error> for NodeError {
+    fn from(e: std::io::Error) -> Self {
+        NodeError::Custom(e.to_string())
+    }
+}
+
 macro_rules! impl_from_shared_value_tuple {
     ($($T:ident),+) => {
         impl<$($T: FromSharedValue + Any),+> FromSharedValue for ($($T,)+) {
