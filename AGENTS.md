@@ -12,79 +12,9 @@
 
 - **Improve existing code.** When encountering misspelled or single-letter variables in source code, refactor them to use clear, descriptive names.
 
+- Always run `cargo fmt` after making changes to maintain consistent code formatting.
+
 ## DSL Documentation
 
-Module Structure
-
-Modules are the fundamental building blocks of the DSL. They follow this basic structure:
-
-```
-name module {
-  property <- value
-}
-```
-
-The module name is optional. If omitted, the module is anonymous:
-
-```
-module {
-  property <- value
-}
-```
-
-Modules can be nested within properties:
-
-```
-module {
-  property <- another_module {
-    property <- value
-  }
-}
-```
-
-Modules have implicit input and output ports. These can be referenced explicitly using the :: operator.
-
-```
-module {
-  # Access the output port of another module
-  property_a <- another_module::output {
-    property <- value
-  }
-  
-  # Access a specific property of another module
-  property_b <- another_module::property {
-    property <- value
-  }
-  
-  # Chain input assignment through a module's input port
-  property_c <- another_module::input <- "./examples/conduit-example/cover.png"
-}
-```
-
-Modules can declare explicit inputs and outputs using the `<-` operator at the top level:
-
-```
--> property_a
--> property_b
-
-module_a module {
-  property_a <- property_a
-  property_b <- property_b
-}
-
-<- module_a::property_a
-```
-
-Properties can contain arithmetic expressions enclosed in parentheses:
-
-```
-module_a module {
-  property_a <- (1 + 1)
-}
-
-module_b module {
-  property_a <- (1 + 1)
-  property_b <- ((1 + 1) * 2)
-  property_c <- ((1 + 1) * module_a::property_a)
-}
-```
+For detailed documentation on the DSL syntax and usage, refer to the [DSL Test](./packages/conduit/src/test.rs) file. 
+This file contains comprehensive examples and explanations of the DSL's features and conventions.

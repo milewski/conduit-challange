@@ -206,8 +206,7 @@ mod tests {
             a * b
         }
 
-        let ((a, b), (c, d), (e, f), (g, h)): ((u32, u32), (u32, u32), (u32, u32), (u32, u32)) = pipeline!(
-            r#"
+        let ((a, b), (c, d), (e, f), (g, h)): ((u32, u32), (u32, u32), (u32, u32), (u32, u32)) = pipeline! {r#"
             # simpler version
             number -> [
                 a multiplier { b <- 2 }
@@ -235,8 +234,7 @@ mod tests {
             }
 
             <- ((a, b), (c, d), (e, f), (g, h))
-        "#
-        );
+        "#};
 
         assert_eq!((a, b), (10, 20));
         assert_eq!((c, d), (10, 20));
