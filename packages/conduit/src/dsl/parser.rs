@@ -381,6 +381,21 @@ impl Visitor {
                     property: related_property.as_str().to_string(),
                 })
             }
+            Rule::array_map => {
+                let mut values = Vec::new();
+                for inner in pair.into_inner() {
+                    let (node, property) = self.visit_node(inner)?;
+
+                    values.push(Value::Relation {
+                        direction,
+                        identifier: node.identifier.clone(),
+                        property: property
+                            .map(|property| property.as_str().to_string())
+                            .unwrap_or_else(|| direction.reverse().as_str().to_string()),
+                    });
+                }
+                Ok(Value::Tuple { direction, values })
+            }
             Rule::tuple => {
                 let mut values = Vec::new();
                 for inner in pair.into_inner() {
@@ -438,28 +453,49 @@ impl Visitor {
             .parse(expression)
     }
 
+    fn collect_relations(
+        source_identifier: Identifier,
+        source_property: String,
+        value: &Value,
+        updates: &mut Vec<(Identifier, Property, Value)>,
+    ) {
+        match value {
+            Value::Relation {
+                identifier,
+                direction,
+                property,
+            } => {
+                updates.push((
+                    identifier.clone(),
+                    property.clone(),
+                    Value::Relation {
+                        identifier: source_identifier,
+                        direction: direction.reverse(),
+                        property: source_property,
+                    },
+                ));
+            }
+            Value::Tuple { values, .. } => {
+                for value in values {
+                    Self::collect_relations(
+                        source_identifier.clone(),
+                        source_property.clone(),
+                        value,
+                        updates,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Add bidirectional relations between linked nodes.
     pub fn link(&mut self) -> Result<(), ParserError> {
         let mut updates: Vec<(Identifier, Property, Value)> = Vec::new();
 
         for (_, node) in self.nodes.iter() {
             for (name, value) in &node.inputs {
-                if let Value::Relation {
-                    identifier,
-                    direction,
-                    property,
-                } = value
-                {
-                    updates.push((
-                        identifier.clone(),
-                        property.clone(),
-                        Value::Relation {
-                            identifier: node.identifier.clone(),
-                            direction: direction.reverse(),
-                            property: name.clone(),
-                        },
-                    ));
-                }
+                Self::collect_relations(node.identifier.clone(), name.clone(), value, &mut updates);
             }
         }
 

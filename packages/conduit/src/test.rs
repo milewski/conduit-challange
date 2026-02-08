@@ -182,13 +182,61 @@ mod tests {
             }
         }
 
-        let output: u32 = pipeline!(r#"
+        let output: u32 = pipeline!(
+            r#"
             <- async_checked_divide {
                 dividend <- 10
                 divisor <- 2
             }
-        "#);
+        "#
+        );
 
         assert_eq!(output, 5);
+    }
+
+    #[test]
+    fn test_multiple_nodes_on_a_single_output() {
+        #[functional_node]
+        async fn number() -> u32 {
+            5
+        }
+
+        #[functional_node]
+        async fn multiplier(a: u32, b: u32) -> u32 {
+            a * b
+        }
+
+        let ((a, b), (c, d), (e, f)): ((u32, u32), (u32, u32), (u32, u32)) = pipeline!(
+            r#"
+            # simpler version
+            number -> [
+                c multiplier::a { b <- 2 }
+                d multiplier::a { b <- 4 }
+            ]
+
+            # the same but with an explicit output
+            number::output -> [
+                a multiplier::a { b <- 2 }
+                b multiplier::a { b <- 4 }
+            ]
+
+            # verbose version
+            number {
+                output -> [
+                    e multiplier::a { b <- 2 }
+                    f multiplier::a { b <- 4 }
+                ]
+            }
+
+            <- ((a, b), (c, d), (e, f))
+        "#
+        );
+
+        assert_eq!(a, 10);
+        assert_eq!(b, 20);
+        assert_eq!(c, 10);
+        assert_eq!(d, 20);
+        assert_eq!(e, 10);
+        assert_eq!(f, 20);
     }
 }

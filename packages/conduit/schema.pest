@@ -32,8 +32,9 @@ number = @{
 boolean = { "true" | "false" }
 relation = { identifier ~ "::" ~ property }
 tuple = { "(" ~ NEWLINE* ~ value ~ ("," ~ NEWLINE* ~ value)+ ~ ","? ~ NEWLINE* ~ ")" }
+array_map = { "[" ~ NEWLINE* ~ (node ~ NEWLINE*)* ~ "]" }
 
-value = { string | boolean | tuple | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier }
+value = { string | boolean | tuple | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier | array_map }
 
 expression = { numeric ~ (operation ~ numeric)* }
 numeric = _{ number | relation | identifier | "(" ~ expression ~ ")" }
