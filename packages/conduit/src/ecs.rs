@@ -230,7 +230,7 @@ fn build_dependency_graph(
                     }
                 },
                 Value::Expression { value: expr, .. } => {
-                    for (ref_id, _) in collect_expr_refs(expr) {
+                    for (ref_id, _) in collect_expression_references(expr) {
                         let ref_idx = index_map
                             .get(ref_id)
                             .or_else(|| index_map.get(&format!("__input_{}", ref_id)));
@@ -262,7 +262,7 @@ fn compute_execution_levels(graph: &DiGraph<Identifier, String>) -> Vec<Vec<Node
             .max();
 
         let level = match max_dep_level {
-            Some(l) => l + 1,
+            Some(level) => level + 1,
             None => 0,
         };
 
@@ -336,7 +336,7 @@ fn resolve_inputs(
                     }
                 }
             }
-            _ => {}
+            _ => unreachable!("todo: validate that this is really unreachable.")
         }
     }
 
@@ -344,14 +344,14 @@ fn resolve_inputs(
 }
 
 /// Collect all node references from an expression tree.
-fn collect_expr_refs(expr: &Expression) -> Vec<(&str, &str)> {
-    match expr {
+fn collect_expression_references(expression: &Expression) -> Vec<(&str, &str)> {
+    match expression {
         Expression::Number(_) => vec![],
         Expression::Reference { identifier, property } => vec![(identifier.as_str(), property.as_str())],
         Expression::BinaryOperation { left, right, .. } => {
-            let mut refs = collect_expr_refs(left);
-            refs.extend(collect_expr_refs(right));
-            refs
+            let mut references = collect_expression_references(left);
+            references.extend(collect_expression_references(right));
+            references
         }
     }
 }
