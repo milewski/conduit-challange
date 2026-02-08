@@ -51,3 +51,4 @@ module = ${ identifier ~ ("::" ~ property)? }
 property = @{ (ASCII_ALPHA | ASCII_DIGIT | "_")+ }
 
 WHITESPACE = _{ " " | "\t" }
+COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
