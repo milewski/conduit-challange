@@ -7,6 +7,7 @@ use crate::node::SharedValue;
 use crate::registry::{NodeRegistry, Payload};
 use crate::traits::NodeOutput;
 use petgraph::Direction as GraphDirection;
+use petgraph::dot::{Config, Dot};
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -46,6 +47,15 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    pub fn generate_dot_graph(&self, workflow: &str) -> Result<String, crate::node::NodeError> {
+        let ParsedWorkflow { nodes, .. } =
+            NodeParser::parse(workflow).map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?;
+
+        let (graph, _) = build_dependency_graph(&nodes);
+
+        Ok(format!("{}", Dot::with_config(&graph, &[Config::EdgeNoLabel])))
     }
 
     pub async fn run_pipeline_async<I: NodeOutput, T: FromSharedValue>(
@@ -590,6 +600,23 @@ fn shared_value_to_f64(value: &SharedValue) -> Result<f64, crate::node::NodeErro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_generate_dot_graph() {
+        let engine = Engine::new();
+        let dot = engine
+            .generate_dot_graph(
+                r#"
+            a module_a { x <- 1 }
+            b module_b { y <- a::x }
+        "#,
+            )
+            .unwrap();
+
+        assert!(dot.contains("digraph {"));
+        assert!(dot.contains("label = \"a\""));
+        assert!(dot.contains("label = \"b\""));
+    }
 
     #[test]
     fn test_build_graph_no_dependencies() {
