@@ -4,7 +4,8 @@ pipeline_result = { "<-" ~ value }
 
 for_loop = { "for" ~ identifier ~ "in" ~ range ~ loop_body }
 loop_body = { "{" ~ NEWLINE* ~ (node | anonymous_node | for_loop | NEWLINE)* ~ "}" }
-range = { number ~ ".." ~ number }
+range = { range_bound ~ ".." ~ range_bound }
+range_bound = { number | interpolation | relation | identifier }
 
 node = { identifier ~ module ~ (shorthand | body) }
 anonymous_node = { module ~ (shorthand | body) }

@@ -162,35 +162,35 @@ impl Visitor {
         let loop_body_pair = pairs.next().unwrap();
 
         let mut range_pairs = range_pair.into_inner();
-        let start_str = range_pairs.next().unwrap().as_str();
-        let end_str = range_pairs.next().unwrap().as_str();
+        let start_pair = range_pairs.next().unwrap();
+        let end_pair = range_pairs.next().unwrap();
 
-        let start: i32 = start_str.parse().unwrap(); // TODO: Better error handling
-        let end: i32 = end_str.parse().unwrap();
+        let start = self.resolve_range_bound(start_pair)?;
+        let end = self.resolve_range_bound(end_pair)?;
 
         let old_suffix = self.suffix.clone();
 
         for index in start..end {
-             if identifier != "_" {
-                 let value = Value::Numeric {
-                     direction: Direction::Input,
-                     value: index.to_string(),
-                 };
+            if identifier != "_" {
+                let value = Value::Numeric {
+                    direction: Direction::Input,
+                    value: index.to_string(),
+                };
 
-                 self.scope.insert(identifier.clone(), value);
-             }
+                self.scope.insert(identifier.clone(), value);
+            }
 
-             // Append iteration to suffix to ensure unique node IDs inside loop
-             self.suffix = format!("{}{}", old_suffix, index);
+            // Append iteration to suffix to ensure unique node IDs inside loop
+            self.suffix = format!("{}{}", old_suffix, index);
 
-             for child in loop_body_pair.clone().into_inner() {
-                 match child.as_rule() {
-                     Rule::for_loop => self.visit_for_loop(child)?,
-                     Rule::node | Rule::anonymous_node => {
-                         self.visit_node(child)?;
-                     },
-                     _ => unreachable!("Unexpected rule in loop body: {:?}", child.as_rule()),
-                 }
+            for child in loop_body_pair.clone().into_inner() {
+                match child.as_rule() {
+                    Rule::for_loop => self.visit_for_loop(child)?,
+                    Rule::node | Rule::anonymous_node => {
+                        self.visit_node(child)?;
+                    }
+                    _ => unreachable!("Unexpected rule in loop body: {:?}", child.as_rule()),
+                }
             }
         }
 
@@ -439,6 +439,78 @@ impl Visitor {
         }
         self.inputs.insert(name, value);
         Ok(())
+    }
+
+    fn resolve_range_bound(&self, pair: Pair<Rule>) -> Result<i32, ParserError> {
+        let inner = pair.into_inner().next().unwrap();
+        match inner.as_rule() {
+            Rule::number => inner.as_str().parse().map_err(|_| ParserError::InvalidNumber),
+            Rule::interpolation => {
+                let content = inner.into_inner().next().unwrap().as_str();
+                let mut pairs =
+                    Schema::parse(Rule::interpolation_expression, content).map_err(|e| ParserError::from(e))?;
+                let expr_pair = pairs.next().unwrap().into_inner().next().unwrap();
+                self.evaluate_expression_constant(expr_pair)
+            }
+            Rule::relation => self.evaluate_relation_constant(inner),
+            Rule::identifier => self.evaluate_identifier_constant(inner),
+            _ => unreachable!(),
+        }
+    }
+
+    fn evaluate_expression_constant(&self, pair: Pair<Rule>) -> Result<i32, ParserError> {
+        // Simple expression evaluation for constants.
+        // For now, only support direct values (number, identifier, relation) inside expression.
+        // Full expression evaluation would require a recursive evaluator.
+
+        let mut pairs = pair.into_inner();
+        let primary = pairs.next().unwrap();
+
+        // Handle simple case: primary value only
+        match primary.as_rule() {
+            Rule::number => primary.as_str().parse().map_err(|_| ParserError::InvalidNumber),
+            Rule::identifier => self.evaluate_identifier_constant(primary),
+            Rule::relation => self.evaluate_relation_constant(primary),
+            Rule::expression => self.evaluate_expression_constant(primary), // Nested (parentheses)
+            _ => Err(ParserError::NonConstantExpression),
+        }
+    }
+
+    fn evaluate_identifier_constant(&self, pair: Pair<Rule>) -> Result<i32, ParserError> {
+        let name = pair.as_str();
+        // Check scope (loop variables)
+        if let Some(val) = self.scope.get(name) {
+            return self.value_to_int(val);
+        }
+        // Check inputs
+        if let Some(Some(val)) = self.inputs.get(name) {
+            return self.value_to_int(val);
+        }
+
+        Err(ParserError::ConstantNotFound(name.to_string()))
+    }
+
+    fn evaluate_relation_constant(&self, pair: Pair<Rule>) -> Result<i32, ParserError> {
+        let mut pairs = pair.into_inner();
+        let identifier = pairs.next().unwrap().as_str();
+        let property = pairs.next().unwrap().as_str();
+
+        let resolved_id = self.aliases.get(identifier).map(|s| s.as_str()).unwrap_or(identifier);
+
+        if let Some(node) = self.nodes.get(resolved_id) {
+            if let Some(val) = node.inputs.get(property) {
+                return self.value_to_int(val);
+            }
+        }
+
+        Err(ParserError::ConstantNotFound(format!("{}::{}", identifier, property)))
+    }
+
+    fn value_to_int(&self, value: &Value) -> Result<i32, ParserError> {
+        match value {
+            Value::Numeric { value, .. } => value.parse().map_err(|_| ParserError::InvalidNumber),
+            _ => Err(ParserError::NonNumericValue),
+        }
     }
 
     pub fn visit_pipeline_result(&mut self, pair: Pair<Rule>) -> Result<(), ParserError> {

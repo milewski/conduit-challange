@@ -401,18 +401,24 @@ mod tests {
     fn test_for_loop_range_can_receive_dynamic_inputs() {
         let output: u32 = pipeline! {r#"
             store _ {
-                from <- 1
+                from <- 0
                 to <- 5
-                counter <- 0
+                counter <- 1
             }
 
+            #  1 * 0 + 1 =  1
+            #  1 * 1 + 1 =  2
+            #  2 * 2 + 1 =  5
+            #  5 * 3 + 1 = 16
+            # 16 * 4 + 1 = 65
+
             for index in { store::from }..{ store::to } {
-                store::counter <- index
+                store::counter <- (store::counter * index + 1)
             }
 
             <- store::counter
         "#};
 
-        assert_eq!(output, 4);
+        assert_eq!(output, 65);
     }
 }

@@ -11,6 +11,18 @@ pub enum ParserError {
     #[error("data store disconnected")]
     DuplicatedNode { identifier: String },
 
+    #[error("Invalid number format")]
+    InvalidNumber,
+
+    #[error("Expression is not a constant")]
+    NonConstantExpression,
+
+    #[error("Constant not found: {0}")]
+    ConstantNotFound(String),
+
+    #[error("Value is not numeric")]
+    NonNumericValue,
+
     #[error("data store disconnected")]
     ParserError(#[from] pest::error::Error<Rule>),
 }
