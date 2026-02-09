@@ -443,4 +443,25 @@ mod tests {
 
         assert_eq!(output, (5, 10));
     }
+
+    #[test]
+    fn test_passing_array_as_input() {
+        let output: String = pipeline! {r#"
+            store _ {
+                latest <- "default"
+                prompts <- [
+                    "Generate a high-resolution image based on the prompt"
+                    "Resize the image to the specified dimensions"
+                ]
+            }
+
+            for prompt in store::prompts {
+                store::latest <- prompt
+            }
+
+            <- store::latest
+        "#};
+
+        assert_eq!(output, "Resize the image to the specified dimensions");
+    }
 }

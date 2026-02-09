@@ -29,6 +29,9 @@ pub enum ParserError {
     #[error("Negative exponent")]
     NegativeExponent,
 
+    #[error("Mixed types in array")]
+    MixedTypesInArray,
+
     #[error("data store disconnected")]
     ParserError(#[from] pest::error::Error<Rule>),
 }

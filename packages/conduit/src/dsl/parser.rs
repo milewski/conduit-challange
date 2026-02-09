@@ -165,25 +165,74 @@ impl Visitor {
         let mut pairs = pair.into_inner();
 
         let identifier = pairs.next().unwrap().as_str().to_string();
-        let range_pair = pairs.next().unwrap();
+        let iterable_pair = pairs.next().unwrap();
         let loop_body_pair = pairs.next().unwrap();
 
-        let mut range_pairs = range_pair.into_inner();
-        let start_pair = range_pairs.next().unwrap();
-        let end_pair = range_pairs.next().unwrap();
+        let inner_iterable = iterable_pair.into_inner().next().unwrap();
 
-        let start = self.resolve_range_bound(start_pair)?;
-        let end = self.resolve_range_bound(end_pair)?;
+        let values: Vec<Value> = match inner_iterable.as_rule() {
+            Rule::range => {
+                let mut range_pairs = inner_iterable.into_inner();
+                let start_pair = range_pairs.next().unwrap();
+                let end_pair = range_pairs.next().unwrap();
+
+                let start = self.resolve_range_bound(start_pair)?;
+                let end = self.resolve_range_bound(end_pair)?;
+
+                (start..end)
+                    .map(|index| Value::Numeric {
+                        direction: Direction::Input,
+                        value: index.to_string(),
+                    })
+                    .collect()
+            }
+            Rule::identifier => {
+                let name = inner_iterable.as_str();
+                let value = if let Some(value) = self.scope.get(name) {
+                    Some(value.clone())
+                } else if let Some(Some(value)) = self.inputs.get(name) {
+                    Some(value.clone())
+                } else {
+                    None
+                };
+
+                match value {
+                    Some(Value::Tuple { values, .. }) => values,
+                    Some(_) => return Err(ParserError::ConstantNotFound(format!("{} is not an array", name))),
+                    None => return Err(ParserError::ConstantNotFound(name.to_string())),
+                }
+            }
+            Rule::relation => {
+                let mut pairs = inner_iterable.into_inner();
+                let id_str = pairs.next().unwrap().as_str();
+                let prop_str = pairs.next().unwrap().as_str();
+
+                let resolved_id = self.aliases.get(id_str).map(|s| s.as_str()).unwrap_or(id_str);
+
+                let value = if let Some(node) = self.nodes.get(resolved_id) {
+                    node.inputs.get(prop_str).cloned()
+                } else {
+                    None
+                };
+
+                match value {
+                    Some(Value::Tuple { values, .. }) => values,
+                    Some(_) => {
+                        return Err(ParserError::ConstantNotFound(format!(
+                            "{}::{} is not an array",
+                            id_str, prop_str
+                        )));
+                    }
+                    None => return Err(ParserError::ConstantNotFound(format!("{}::{}", id_str, prop_str))),
+                }
+            }
+            _ => unreachable!(),
+        };
 
         let old_suffix = self.suffix.clone();
 
-        for index in start..end {
+        for (index, value) in values.into_iter().enumerate() {
             if identifier != "_" {
-                let value = Value::Numeric {
-                    direction: Direction::Input,
-                    value: index.to_string(),
-                };
-
                 self.scope.insert(identifier.clone(), value);
             }
 
@@ -681,19 +730,21 @@ impl Visitor {
                     property: related_property.as_str().to_string(),
                 })
             }
-            Rule::array_map => {
+            Rule::array => {
                 let mut values = Vec::new();
                 for inner in pair.into_inner() {
-                    let (node, property) = self.visit_node(inner)?;
-
-                    values.push(Value::Relation {
-                        direction,
-                        identifier: node.identifier.clone(),
-                        property: property
-                            .map(|property| property.as_str().to_string())
-                            .unwrap_or_else(|| direction.reverse().as_str().to_string()),
-                    });
+                    values.push(self.visit_value(inner, direction)?);
                 }
+
+                if let Some(first) = values.first() {
+                    let first_discriminant = std::mem::discriminant(first);
+                    for value in &values {
+                        if std::mem::discriminant(value) != first_discriminant {
+                            return Err(ParserError::MixedTypesInArray);
+                        }
+                    }
+                }
+
                 Ok(Value::Tuple { direction, values })
             }
             Rule::tuple => {

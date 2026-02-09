@@ -2,7 +2,8 @@ nodes = { SOI ~ NEWLINE* ~ ((input_def | pipeline_result | for_loop | anonymous_
 input_def = { "->" ~ identifier ~ ("<-" ~ value)? }
 pipeline_result = { "<-" ~ value }
 
-for_loop = { "for" ~ identifier ~ "in" ~ range ~ loop_body }
+for_loop = { "for" ~ identifier ~ "in" ~ iterable ~ loop_body }
+iterable = { range | relation | identifier }
 loop_body = { "{" ~ NEWLINE* ~ (node | anonymous_node | for_loop | NEWLINE)* ~ "}" }
 range = { range_bound ~ ".." ~ range_bound }
 range_bound = { number | interpolation | relation | identifier }
@@ -38,9 +39,9 @@ number = @{
 boolean = { "true" | "false" }
 relation = { identifier ~ "::" ~ property }
 tuple = { "(" ~ NEWLINE* ~ value ~ ("," ~ NEWLINE* ~ value)+ ~ ","? ~ NEWLINE* ~ ")" }
-array_map = { "[" ~ NEWLINE* ~ (node ~ NEWLINE*)* ~ "]" }
+array = { "[" ~ NEWLINE* ~ (value ~ NEWLINE*)* ~ "]" }
 
-value = { string | boolean | tuple | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier | array_map }
+value = { string | boolean | tuple | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier | array }
 
 expression = { numeric ~ (operation ~ numeric)* }
 numeric = _{ number | string | relation | identifier | "(" ~ expression ~ ")" }
