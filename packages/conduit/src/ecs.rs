@@ -50,12 +50,71 @@ impl Engine {
     }
 
     pub fn generate_dot_graph(&self, workflow: &str) -> Result<String, crate::node::NodeError> {
-        let ParsedWorkflow { nodes, .. } =
+        let ParsedWorkflow { nodes, inputs } =
             NodeParser::parse(workflow).map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?;
 
         let (graph, _) = build_dependency_graph(&nodes);
 
-        Ok(format!("{}", Dot::with_config(&graph, &[Config::EdgeNoLabel])))
+        let get_node_attributes = |_, (_, id): (_, &Identifier)| {
+            if let Some(instruct) = nodes.get(id) {
+                let module_name = if id == PIPELINE_RESULT_ID {
+                    "Result"
+                } else {
+                    &instruct.module
+                };
+                let mut label = format!("{} ({})", module_name, id);
+                if !instruct.inputs.is_empty() {
+                    label.push_str("\\n");
+                    let props: Vec<String> = instruct
+                        .inputs
+                        .iter()
+                        .map(|(k, v)| {
+                            let val_str = match v {
+                                Value::String { parts, .. } => {
+                                    let s: String = parts
+                                        .iter()
+                                        .map(|p| match p {
+                                            StringPart::Literal(l) => l.clone(),
+                                            StringPart::Interpolation(_) => "${...}".to_string(),
+                                        })
+                                        .collect();
+                                    format!("\\\"{}\\\"", s.replace("\"", "\\\""))
+                                }
+                                Value::Numeric { value, .. } => value.clone(),
+                                Value::Boolean { value, .. } => value.to_string(),
+                                Value::Relation {
+                                    identifier, property, ..
+                                } => {
+                                    if let Some(target) = nodes.get(identifier) {
+                                        format!("{} ({}) :: {}", target.module, identifier, property)
+                                    } else if inputs.contains_key(identifier) {
+                                        format!("Input ({}) :: {}", identifier, property)
+                                    } else {
+                                        format!("{} :: {}", identifier, property)
+                                    }
+                                }
+                                _ => format!("{:?}", v).replace("\"", "\\\""),
+                            };
+                            format!("{}: {}", k, val_str)
+                        })
+                        .collect();
+                    label.push_str(&props.join("\\n"));
+                }
+                format!("label=\"{}\"", label)
+            } else {
+                format!("label=\"{}\"", id)
+            }
+        };
+
+        Ok(format!(
+            "{}",
+            Dot::with_attr_getters(
+                &graph,
+                &[Config::EdgeNoLabel, Config::NodeNoLabel],
+                &|_, _| String::new(),
+                &get_node_attributes
+            )
+        ))
     }
 
     pub async fn run_pipeline_async<I: NodeOutput, T: FromSharedValue>(

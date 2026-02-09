@@ -17,3 +17,4 @@ async-trait = { workspace = true }
 conduit = { workspace = true }
 conduit-derive = { workspace = true }
 inventory = { workspace = true }
+tokio = { version = "1.49.0", features = ["fs"] }

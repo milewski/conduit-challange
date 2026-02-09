@@ -220,6 +220,7 @@ dependencies = [
  "conduit-derive",
  "image",
  "inventory",
+ "tokio",
 ]
 
 [[package]]
