@@ -54,7 +54,7 @@ operation = _{ add | subtract | multiply | divide | power }
     power    = { "^" }
 
 direction = { "<-" | "->" }
-identifier = @{ (ASCII_ALPHA | "_")+ }
+identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHA | ASCII_DIGIT | "_")* }
 module = ${ identifier ~ ("::" ~ property)? }
 property = @{ (ASCII_ALPHA | ASCII_DIGIT | "_")+ }
 

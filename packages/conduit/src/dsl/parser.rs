@@ -1,8 +1,10 @@
 use crate::dsl::error::ParserError;
+use crate::node::SharedValue;
 use pest::Parser;
 use pest::iterators::{Pair, Pairs};
 use pest::pratt_parser::{Assoc, Op, PrattParser};
 use pest_derive::Parser;
+use std::any::TypeId;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Index;
 use uuid::Uuid;
@@ -147,6 +149,7 @@ pub struct ParsedWorkflow {
 struct Visitor {
     nodes: BTreeMap<Identifier, NodeInstruct>,
     inputs: BTreeMap<Identifier, Option<Value>>,
+    external_inputs: HashMap<Identifier, SharedValue>,
     scope: HashMap<Identifier, Value>,
     aliases: HashMap<Identifier, Identifier>,
     suffix: String,
@@ -192,6 +195,8 @@ impl Visitor {
                     Some(value.clone())
                 } else if let Some(Some(value)) = self.inputs.get(name) {
                     Some(value.clone())
+                } else if let Some(external_val) = self.external_inputs.get(name) {
+                    convert_shared_value_to_parser_value(external_val)
                 } else {
                     None
                 };
@@ -487,6 +492,8 @@ impl Visitor {
             // Check if there is a value provided
             let inner = val_pair.into_inner().next().unwrap_or_else(|| unreachable!());
             Some(self.visit_value(inner, Direction::Input)?)
+        } else if let Some(external_val) = self.external_inputs.get(&name) {
+            convert_shared_value_to_parser_value(external_val)
         } else {
             None
         };
@@ -890,13 +897,20 @@ pub struct NodeParser<'a> {
 }
 
 impl<'a> NodeParser<'a> {
-    pub fn parse(source: &'a str) -> Result<ParsedWorkflow, ParserError> {
-        let instance = NodeParser {
+    pub fn new(source: &'a str) -> Result<Self, ParserError> {
+        Ok(NodeParser {
             visitor: Visitor::default(),
             inner: Schema::parse(Rule::nodes, source)?.next(),
-        };
+        })
+    }
 
-        instance.evaluate()
+    pub fn with_inputs(mut self, inputs: HashMap<Identifier, SharedValue>) -> Self {
+        self.visitor.external_inputs = inputs;
+        self
+    }
+
+    pub fn parse(source: &'a str) -> Result<ParsedWorkflow, ParserError> {
+        Self::new(source)?.evaluate()
     }
 
     pub fn evaluate(mut self) -> Result<ParsedWorkflow, ParserError> {
@@ -1147,4 +1161,82 @@ mod tests {
             panic!("Expected Numeric value for width");
         }
     }
+}
+
+fn convert_shared_value_to_parser_value(value: &SharedValue) -> Option<Value> {
+    if TypeId::of::<String>() == value.as_ref().type_id() {
+        if let Some(v) = value.downcast_ref::<String>() {
+            return Some(Value::String {
+                direction: Direction::Input,
+                parts: vec![StringPart::Literal(v.clone())],
+            });
+        }
+    }
+
+    if TypeId::of::<&str>() == value.as_ref().type_id() {
+        if let Some(value) = value.downcast_ref::<&str>() {
+            return Some(Value::String {
+                direction: Direction::Input,
+                parts: vec![StringPart::Literal(value.to_string())],
+            });
+        }
+    }
+
+    macro_rules! check_numeric {
+        ($($t:ty),*) => {
+            $(
+                if TypeId::of::<$t>() == value.as_ref().type_id() {
+                    if let Some(v) = value.downcast_ref::<$t>() {
+                        return Some(Value::Numeric {
+                            direction: Direction::Input,
+                            value: v.to_string(),
+                        });
+                    }
+                }
+            )*
+        };
+    }
+
+    check_numeric!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64);
+
+    if TypeId::of::<bool>() == value.as_ref().type_id() {
+        if let Some(value) = value.downcast_ref::<bool>() {
+            return Some(Value::Boolean {
+                direction: Direction::Input,
+                value: *value,
+            });
+        }
+    }
+
+    if TypeId::of::<Vec<String>>() == value.as_ref().type_id() {
+        if let Some(value) = value.downcast_ref::<Vec<String>>() {
+            return Some(Value::Tuple {
+                direction: Direction::Input,
+                values: value
+                    .iter()
+                    .map(|token| Value::String {
+                        direction: Direction::Input,
+                        parts: vec![StringPart::Literal(token.clone())],
+                    })
+                    .collect(),
+            });
+        }
+    }
+
+    if TypeId::of::<Vec<&str>>() == value.as_ref().type_id() {
+        if let Some(value) = value.downcast_ref::<Vec<&str>>() {
+            return Some(Value::Tuple {
+                direction: Direction::Input,
+                values: value
+                    .iter()
+                    .map(|token| Value::String {
+                        direction: Direction::Input,
+                        parts: vec![StringPart::Literal(token.to_string())],
+                    })
+                    .collect(),
+            });
+        }
+    }
+
+    None
 }

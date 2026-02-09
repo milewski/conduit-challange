@@ -63,8 +63,17 @@ impl Engine {
         workflow: &str,
         input: I,
     ) -> Result<T, crate::node::NodeError> {
-        let ParsedWorkflow { mut nodes, inputs } =
-            NodeParser::parse(workflow).map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?;
+        let runtime_inputs_vec = input.into_outputs();
+        let runtime_inputs: HashMap<String, SharedValue> = runtime_inputs_vec
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect();
+
+        let ParsedWorkflow { mut nodes, inputs } = NodeParser::new(workflow)
+            .map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?
+            .with_inputs(runtime_inputs.clone())
+            .evaluate()
+            .map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?;
 
         // Create nodes for inputs
         let mut input_names = std::collections::HashSet::new();
@@ -91,13 +100,6 @@ impl Engine {
         let levels = compute_execution_levels(&graph);
 
         let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
-
-        // Prepare runtime inputs
-        let runtime_inputs_vec = input.into_outputs();
-        let runtime_inputs: HashMap<String, SharedValue> = runtime_inputs_vec
-            .into_iter()
-            .map(|(key, value)| (key.to_string(), value))
-            .collect();
 
         // Pre-populate outputs from data-only nodes (ignored modules or unregistered for legacy support).
         // These act as constant/config holders whose literal inputs are
@@ -580,21 +582,27 @@ fn shared_value_to_string(value: &SharedValue) -> Result<String, crate::node::No
 }
 
 fn shared_value_to_f64(value: &SharedValue) -> Result<f64, crate::node::NodeError> {
-    if let Some(v) = value.downcast_ref::<f64>() {
-        Ok(*v)
-    } else if let Some(v) = value.downcast_ref::<i128>() {
-        Ok(*v as f64)
-    } else if let Some(v) = value.downcast_ref::<u32>() {
-        Ok(*v as f64)
-    } else if let Some(v) = value.downcast_ref::<i32>() {
-        Ok(*v as f64)
-    } else if let Some(v) = value.downcast_ref::<i64>() {
-        Ok(*v as f64)
-    } else if let Some(v) = value.downcast_ref::<f32>() {
-        Ok(*v as f64)
-    } else {
-        Err(crate::node::NodeError::NotANumericType)
+    if let Some(value) = value.downcast_ref::<f64>() {
+        return Ok(*value);
     }
+
+    if let Some(value) = value.downcast_ref::<f32>() {
+        return Ok(*value as f64);
+    }
+
+    macro_rules! check_numeric {
+        ($($t:ty),*) => {
+            $(
+                if let Some(value) = value.downcast_ref::<$t>() {
+                    return Ok(*value as f64);
+                }
+            )*
+        };
+    }
+
+    check_numeric!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+
+    Err(crate::node::NodeError::NotANumericType)
 }
 
 #[cfg(test)]

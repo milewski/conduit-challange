@@ -94,39 +94,48 @@ impl NodeOutput for DynamicInput {
 
 pub trait AsInput {
     type Output: std::any::Any + Send + Sync;
-    fn as_input(self) -> Self::Output;
-}
 
-impl AsInput for String {
-    type Output = String;
-    fn as_input(self) -> String {
-        self
-    }
+    fn as_input(self) -> Self::Output;
 }
 
 impl AsInput for &str {
     type Output = String;
+
     fn as_input(self) -> String {
         self.to_string()
     }
 }
 
 macro_rules! impl_as_input_identity {
-    ($t:ty) => {
-        impl AsInput for $t {
-            type Output = $t;
-            fn as_input(self) -> $t {
+    ($kind:ty) => {
+        impl AsInput for $kind {
+            type Output = $kind;
+            fn as_input(self) -> $kind {
                 self
             }
         }
     };
 }
 
+impl_as_input_identity!(u8);
+impl_as_input_identity!(u16);
 impl_as_input_identity!(u32);
+impl_as_input_identity!(u64);
+impl_as_input_identity!(u128);
+impl_as_input_identity!(usize);
+impl_as_input_identity!(i8);
+impl_as_input_identity!(i16);
 impl_as_input_identity!(i32);
+impl_as_input_identity!(i64);
+impl_as_input_identity!(i128);
+impl_as_input_identity!(isize);
+impl_as_input_identity!(f32);
 impl_as_input_identity!(f64);
 impl_as_input_identity!(bool);
+impl_as_input_identity!(String);
 impl_as_input_identity!(Vec<u8>);
+impl_as_input_identity!(Vec<String>);
+impl_as_input_identity!(Vec<&'static str>);
 
 // -- User-facing trait (not object-safe) --
 

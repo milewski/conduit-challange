@@ -464,4 +464,74 @@ mod tests {
 
         assert_eq!(output, "Resize the image to the specified dimensions");
     }
+
+    #[test]
+    fn test_arrays_can_be_given_from_inputs() {
+        let inputs = input! {
+            prompts: vec!["Hello", "World"]
+        };
+
+        let output: String = pipeline! {inputs, r#"
+            store _ { latest <- "" }
+            -> prompts
+            -> prompts_with_default <- []
+
+            for prompt in prompts {
+                store::latest <- prompt
+            }
+
+            <- store::latest
+        "#};
+
+        assert_eq!(output, "World");
+    }
+
+    #[test]
+    fn test_all_numeric_types_inputs() {
+        let inputs = input! {
+            v_u8: 1u8,
+            v_u16: 1u16,
+            v_u32: 1u32,
+            v_u64: 1u64,
+            v_u128: 1u128,
+            v_usize: 1usize,
+            v_i8: 1i8,
+            v_i16: 1i16,
+            v_i32: 1i32,
+            v_i64: 1i64,
+            v_i128: 1i128,
+            v_isize: 1isize,
+            v_f32: 1.0f32,
+            v_f64: 1.0f64
+        };
+
+        let output: String = pipeline! {inputs, r#"
+            -> v_u8
+            -> v_u16
+            -> v_u32
+            -> v_u64
+            -> v_u128
+            -> v_usize
+            -> v_i8
+            -> v_i16
+            -> v_i32
+            -> v_i64
+            -> v_i128
+            -> v_isize
+            -> v_f32
+            -> v_f64
+
+            store _ {
+                res <- "init"
+            }
+
+            # Just using them in expressions to verify they resolve correctly as Numerics
+            store::res <- "{ (v_u8 + v_u16 + v_u32 + v_u64 + v_u128 + v_usize + v_i8 + v_i16 + v_i32 + v_i64 + v_i128 + v_isize + v_f32 + v_f64) }"
+
+            <- store::res
+        "#};
+
+        // 14 * 1 = 14
+        assert_eq!(output, "14");
+    }
 }
