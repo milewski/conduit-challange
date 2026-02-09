@@ -152,6 +152,13 @@ struct Visitor {
     suffix: String,
 }
 
+fn expression_parser() -> PrattParser<Rule> {
+    PrattParser::new()
+        .op(Op::infix(Rule::add, Assoc::Left) | Op::infix(Rule::subtract, Assoc::Left))
+        .op(Op::infix(Rule::multiply, Assoc::Left) | Op::infix(Rule::divide, Assoc::Left))
+        .op(Op::infix(Rule::power, Assoc::Right))
+}
+
 impl Visitor {
     pub fn visit_for_loop(&mut self, pair: Pair<Rule>) -> Result<(), ParserError> {
         assert_eq!(pair.as_rule(), Rule::for_loop);
@@ -264,6 +271,7 @@ impl Visitor {
             };
 
             let mut new_node = NodeInstruct::new(Some(&new_id), &original_module);
+            new_node.inputs = original_node.inputs.clone();
 
             // Map the assignment property (which was parsed as module property)
             // e.g. store::counter -> module_property is "counter"
@@ -459,21 +467,43 @@ impl Visitor {
     }
 
     fn evaluate_expression_constant(&self, pair: Pair<Rule>) -> Result<i32, ParserError> {
-        // Simple expression evaluation for constants.
-        // For now, only support direct values (number, identifier, relation) inside expression.
-        // Full expression evaluation would require a recursive evaluator.
+        let pairs = pair.into_inner();
 
-        let mut pairs = pair.into_inner();
-        let primary = pairs.next().unwrap();
-
-        // Handle simple case: primary value only
-        match primary.as_rule() {
-            Rule::number => primary.as_str().parse().map_err(|_| ParserError::InvalidNumber),
-            Rule::identifier => self.evaluate_identifier_constant(primary),
-            Rule::relation => self.evaluate_relation_constant(primary),
-            Rule::expression => self.evaluate_expression_constant(primary), // Nested (parentheses)
-            _ => Err(ParserError::NonConstantExpression),
-        }
+        expression_parser()
+            .map_primary(|primary| -> Result<i32, ParserError> {
+                match primary.as_rule() {
+                    Rule::number => primary.as_str().parse().map_err(|_| ParserError::InvalidNumber),
+                    Rule::identifier => self.evaluate_identifier_constant(primary),
+                    Rule::relation => self.evaluate_relation_constant(primary),
+                    Rule::expression => self.evaluate_expression_constant(primary),
+                    _ => Err(ParserError::NonConstantExpression),
+                }
+            })
+            .map_infix(|left, op, right| {
+                let left = left?;
+                let right = right?;
+                match op.as_rule() {
+                    Rule::add => Ok(left + right),
+                    Rule::subtract => Ok(left - right),
+                    Rule::multiply => Ok(left * right),
+                    Rule::divide => {
+                        if right == 0 {
+                            Err(ParserError::DivisionByZero)
+                        } else {
+                            Ok(left / right)
+                        }
+                    }
+                    Rule::power => {
+                        if right < 0 {
+                            Err(ParserError::NegativeExponent)
+                        } else {
+                            Ok(left.pow(right as u32))
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            })
+            .parse(pairs)
     }
 
     fn evaluate_identifier_constant(&self, pair: Pair<Rule>) -> Result<i32, ParserError> {
@@ -678,12 +708,7 @@ impl Visitor {
     }
 
     pub fn visit_expression(&self, expression: Pairs<Rule>) -> Result<Expression, ParserError> {
-        let pratt = PrattParser::new()
-            .op(Op::infix(Rule::add, Assoc::Left) | Op::infix(Rule::subtract, Assoc::Left))
-            .op(Op::infix(Rule::multiply, Assoc::Left) | Op::infix(Rule::divide, Assoc::Left))
-            .op(Op::infix(Rule::power, Assoc::Right));
-
-        pratt
+        expression_parser()
             .map_primary(|primary| -> Result<Expression, ParserError> {
                 match primary.as_rule() {
                     Rule::number => Ok(Expression::Number(primary.as_str().to_string())),

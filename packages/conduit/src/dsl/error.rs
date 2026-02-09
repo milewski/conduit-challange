@@ -23,6 +23,12 @@ pub enum ParserError {
     #[error("Value is not numeric")]
     NonNumericValue,
 
+    #[error("Division by zero")]
+    DivisionByZero,
+
+    #[error("Negative exponent")]
+    NegativeExponent,
+
     #[error("data store disconnected")]
     ParserError(#[from] pest::error::Error<Rule>),
 }

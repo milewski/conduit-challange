@@ -421,4 +421,26 @@ mod tests {
 
         assert_eq!(output, 65);
     }
+
+    #[test]
+    fn test_expression_works_on_loop_ranges_and_nested_loops() {
+        let output: (u32, u32) = pipeline! {r#"
+            store _ {
+                counter_a <- 0
+                counter_b <- 0
+            }
+
+            for index in 0..{ 5 + 1 } {
+                store::counter_a <- index
+                for inner in 0..{ 5 + 1 } {
+                    store::counter_b <- (inner + index)
+                }
+            }
+
+            <- store::counter_a
+            <- store::counter_b
+        "#};
+
+        assert_eq!(output, (5, 10));
+    }
 }
