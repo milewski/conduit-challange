@@ -18,6 +18,11 @@ mod tests {
         a + b
     }
 
+    #[functional_node]
+    async fn sleep(#[input] duration: u64) {
+        tokio::time::sleep(tokio::time::Duration::from_millis(duration)).await;
+    }
+
     #[test]
     fn test_input_output() {
         let input = input! { name: "rafael" };
@@ -355,5 +360,59 @@ mod tests {
         "#};
 
         assert!(matches!(output, Err(NodeError::MissingInput(_))));
+    }
+
+    #[test]
+    fn test_for_loop() {
+        let output: u32 = pipeline! {r#"
+            store _ {
+                counter <- 0
+            }
+
+            for index in 0..5 {
+                store::counter <- (store::counter + index)
+            }
+
+            <- store::counter
+        "#};
+
+        assert_eq!(output, 10);
+    }
+
+    #[test]
+    fn test_for_loop_is_async() {
+        let output: u32 = pipeline! {r#"
+            store _ {
+                counter <- 0
+            }
+
+            for index in 0..5 {
+                store::counter <- index
+                sleep <- 10
+            }
+
+            <- store::counter
+        "#};
+
+        assert_eq!(output, 4);
+    }
+
+    #[test]
+    fn test_for_loop_range_can_receive_dynamic_inputs() {
+        let output: u32 = pipeline! {r#"
+            store _ {
+                from <- 1
+                to <- 5
+                counter <- 0
+            }
+
+            for index in { store::from }..{ store::to } {
+                store::counter <- index
+            }
+
+            <- store::counter
+        "#};
+
+        assert_eq!(output, 4);
     }
 }

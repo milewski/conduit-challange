@@ -1,6 +1,11 @@
-nodes = { SOI ~ NEWLINE* ~ ((input_def | pipeline_result | anonymous_node | node) ~ NEWLINE*)* ~ EOI }
+nodes = { SOI ~ NEWLINE* ~ ((input_def | pipeline_result | for_loop | anonymous_node | node) ~ NEWLINE*)* ~ EOI }
 input_def = { "->" ~ identifier ~ ("<-" ~ value)? }
 pipeline_result = { "<-" ~ value }
+
+for_loop = { "for" ~ identifier ~ "in" ~ range ~ loop_body }
+loop_body = { "{" ~ NEWLINE* ~ (node | anonymous_node | for_loop | NEWLINE)* ~ "}" }
+range = { number ~ ".." ~ number }
+
 node = { identifier ~ module ~ (shorthand | body) }
 anonymous_node = { module ~ (shorthand | body) }
 
@@ -25,7 +30,7 @@ char = _{
 number = @{
     "-"?
     ~ ("0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
-    ~ ("." ~ ASCII_DIGIT*)?
+    ~ ("." ~ ASCII_DIGIT* ~ !".")?
     ~ (^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
 }
 

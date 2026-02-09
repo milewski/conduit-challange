@@ -3,7 +3,7 @@ use pest::Parser;
 use pest::iterators::{Pair, Pairs};
 use pest::pratt_parser::{Assoc, Op, PrattParser};
 use pest_derive::Parser;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Index;
 use uuid::Uuid;
 
@@ -147,9 +147,62 @@ pub struct ParsedWorkflow {
 struct Visitor {
     nodes: BTreeMap<Identifier, NodeInstruct>,
     inputs: BTreeMap<Identifier, Option<Value>>,
+    scope: HashMap<Identifier, Value>,
+    aliases: HashMap<Identifier, Identifier>,
+    suffix: String,
 }
 
 impl Visitor {
+    pub fn visit_for_loop(&mut self, pair: Pair<Rule>) -> Result<(), ParserError> {
+        assert_eq!(pair.as_rule(), Rule::for_loop);
+        let mut pairs = pair.into_inner();
+
+        let identifier = pairs.next().unwrap().as_str().to_string();
+        let range_pair = pairs.next().unwrap();
+        let loop_body_pair = pairs.next().unwrap();
+
+        let mut range_pairs = range_pair.into_inner();
+        let start_str = range_pairs.next().unwrap().as_str();
+        let end_str = range_pairs.next().unwrap().as_str();
+
+        let start: i32 = start_str.parse().unwrap(); // TODO: Better error handling
+        let end: i32 = end_str.parse().unwrap();
+
+        let old_suffix = self.suffix.clone();
+
+        for index in start..end {
+             if identifier != "_" {
+                 let value = Value::Numeric {
+                     direction: Direction::Input,
+                     value: index.to_string(),
+                 };
+
+                 self.scope.insert(identifier.clone(), value);
+             }
+
+             // Append iteration to suffix to ensure unique node IDs inside loop
+             self.suffix = format!("{}{}", old_suffix, index);
+
+             for child in loop_body_pair.clone().into_inner() {
+                 match child.as_rule() {
+                     Rule::for_loop => self.visit_for_loop(child)?,
+                     Rule::node | Rule::anonymous_node => {
+                         self.visit_node(child)?;
+                     },
+                     _ => unreachable!("Unexpected rule in loop body: {:?}", child.as_rule()),
+                 }
+            }
+        }
+
+        self.suffix = old_suffix;
+
+        if identifier != "_" {
+            self.scope.remove(&identifier);
+        }
+
+        Ok(())
+    }
+
     pub fn visit_node<'a>(
         &'a mut self,
         node: Pair<'a, Rule>,
@@ -171,28 +224,136 @@ impl Visitor {
             _ => unreachable!(),
         };
 
-        let mut module = module.into_inner();
-        let (module_identifier, module_property) = (module.next().unwrap_or_else(|| unreachable!()), module.next());
+        let mut module_pairs = module.into_inner();
+        let (module_identifier, module_property) = (
+            module_pairs.next().unwrap_or_else(|| unreachable!()),
+            module_pairs.next(),
+        );
 
-        let mut node = NodeInstruct::new(identifier, module_identifier.as_str());
+        // Check if this is an "assignment" (anonymous node where module looks like "existing_alias::property")
+        // But be careful: module_identifier is just a string.
+        let is_assignment = if identifier.is_none() && module_property.is_some() {
+            let alias_name = module_identifier.as_str();
+            // Check if alias exists (either global or local alias)
+            self.aliases.contains_key(alias_name) || self.nodes.contains_key(alias_name)
+        } else {
+            false
+        };
 
-        if self.nodes.contains_key(&node.identifier) {
+        let mut node = if is_assignment {
+            let alias_name = module_identifier.as_str();
+            // Resolve the current version of the node
+            let resolved_id = self.aliases.get(alias_name).map(|s| s.as_str()).unwrap_or(alias_name);
+
+            // We need to fetch the original module type of this node to create a new version
+            // But we don't store module type in `aliases`. We must look up the node.
+            let original_node = self
+                .nodes
+                .get(resolved_id)
+                .ok_or_else(|| ParserError::ModuleNotDefined {
+                    identifier: resolved_id.to_string(),
+                })?;
+
+            let original_module = original_node.module.clone();
+
+            // Create a new version
+            let new_id = if self.suffix.is_empty() {
+                Uuid::new_v4().to_string()
+            } else {
+                format!("{}_{}", alias_name, self.suffix)
+            };
+
+            let mut new_node = NodeInstruct::new(Some(&new_id), &original_module);
+
+            // Map the assignment property (which was parsed as module property)
+            // e.g. store::counter -> module_property is "counter"
+            let target_prop = module_property.as_ref().unwrap().as_str().to_string();
+
+            // We'll process body/shorthand and insert values into this new node
+            // But wait, the shorthand/body logic inserts into `node.inputs`.
+            // If the shorthand is just `<- val`, it puts `val` into input named "input" (or from direction).
+            // We want it in `target_prop`.
+
+            // Special handling for assignment body:
+            // If shorthand: `<- value` -> insert into `target_prop`.
+            // If body: `parameter` -> insert into `parameter`.
+            // BUT strict assignment syntax `store::counter <- val` corresponds to shorthand.
+
+            new_node.inputs.insert(
+                target_prop.clone(),
+                Value::Numeric {
+                    direction: Direction::Input,
+                    value: "0".to_string(),
+                },
+            ); // Placeholder
+
+            new_node
+        } else {
+            // Normal node definition
+            let id = if let Some(id_str) = identifier {
+                if !self.suffix.is_empty() {
+                    let new_id = format!("{}_{}", id_str, self.suffix);
+                    self.aliases.insert(id_str.to_string(), new_id.clone());
+                    new_id
+                } else {
+                    id_str.to_string()
+                }
+            } else {
+                // Anonymous
+                Uuid::new_v4().to_string()
+            };
+
+            NodeInstruct::new(Some(&id), module_identifier.as_str())
+        };
+
+        // Re-check duplicated node if we are not in assignment mode (or if explicit ID collide)
+        if !is_assignment && self.nodes.contains_key(&node.identifier) {
             return Err(ParserError::DuplicatedNode {
                 identifier: node.identifier,
             });
         }
 
-        match body_or_shorthand.as_rule() {
-            Rule::body => self.visit_body(&mut node, body_or_shorthand)?,
-            Rule::shorthand => self.visit_shorthand(&mut node, body_or_shorthand)?,
-            _ => unreachable!(),
+        if is_assignment {
+            // For assignment, we need to manually handle the shorthand/body to target specific property
+            // Previous logic: `visit_shorthand` puts into direction-based prop.
+            // We want `store::counter <- val` -> put val into `counter`.
+
+            let target_prop = module_property.as_ref().unwrap().as_str().to_string();
+
+            match body_or_shorthand.as_rule() {
+                Rule::shorthand => {
+                    let mut pairs = body_or_shorthand.into_inner();
+                    let _ = pairs.next();
+                    let pair = pairs.next().unwrap().into_inner().next().unwrap();
+                    let value = self.visit_value(pair, Direction::Input)?;
+                    node.inputs.insert(target_prop, value);
+                }
+                Rule::body => self.visit_body(&mut node, body_or_shorthand)?, // Body allows multiple params
+                _ => unreachable!(),
+            }
+
+            // Update alias to point to this new version
+            let alias_name = module_identifier.as_str();
+            self.aliases.insert(alias_name.to_string(), node.identifier.clone());
+        } else {
+            match body_or_shorthand.as_rule() {
+                Rule::body => self.visit_body(&mut node, body_or_shorthand)?,
+                Rule::shorthand => self.visit_shorthand(&mut node, body_or_shorthand)?,
+                _ => unreachable!(),
+            }
         }
 
         let identifier = node.identifier.clone();
 
         self.nodes.insert(identifier.clone(), node);
 
-        Ok((self.nodes.index(&identifier), module_property))
+        // Return logic is tricky: return reference to inserted node.
+        // Also returns `module_property` which is used for anonymous node linking (implicit output).
+        // If assignment, we probably don't need to link output?
+        Ok((
+            self.nodes.index(&identifier),
+            if is_assignment { None } else { module_property },
+        ))
     }
 
     pub fn visit_shorthand(&mut self, node: &mut NodeInstruct, shorthand: Pair<Rule>) -> Result<(), ParserError> {
@@ -288,6 +449,10 @@ impl Visitor {
         let direction = Direction::Input;
         let value = self.visit_value(inner, direction)?;
 
+        // If the result value is a Relation, it might point to an alias.
+        // visit_value should have already resolved it.
+        // But double check if we need special handling for pipeline result.
+
         if let Some(node) = self.nodes.get_mut(PIPELINE_RESULT_ID) {
             if let Some(existing_value) = node.inputs.get_mut("input") {
                 match existing_value {
@@ -362,11 +527,23 @@ impl Visitor {
                     _ => unreachable!(),
                 },
             }),
-            Rule::identifier => Ok(Value::Relation {
-                direction,
-                identifier: pair.as_str().to_string(),
-                property: direction.reverse().as_str().to_string(),
-            }),
+            Rule::identifier => {
+                let identifier_str = pair.as_str();
+                if let Some(value) = self.scope.get(identifier_str) {
+                    Ok(value.clone())
+                } else {
+                    let identifier = self
+                        .aliases
+                        .get(identifier_str)
+                        .cloned()
+                        .unwrap_or_else(|| identifier_str.to_string());
+                    Ok(Value::Relation {
+                        direction,
+                        identifier,
+                        property: direction.reverse().as_str().to_string(),
+                    })
+                }
+            }
             Rule::node | Rule::anonymous_node => {
                 let (node, property) = self.visit_node(pair)?;
 
@@ -381,17 +558,24 @@ impl Visitor {
             Rule::relation => {
                 let mut pairs = pair.into_inner();
 
-                let (identifier, related_property) = (
+                let (identifier_pair, related_property) = (
                     pairs.next().unwrap_or_else(|| unreachable!()),
                     pairs.next().unwrap_or_else(|| unreachable!()),
                 );
 
-                assert_eq!(identifier.as_rule(), Rule::identifier);
+                assert_eq!(identifier_pair.as_rule(), Rule::identifier);
                 assert_eq!(related_property.as_rule(), Rule::property);
+
+                let identifier_str = identifier_pair.as_str();
+                let identifier = self
+                    .aliases
+                    .get(identifier_str)
+                    .cloned()
+                    .unwrap_or_else(|| identifier_str.to_string());
 
                 Ok(Value::Relation {
                     direction,
-                    identifier: identifier.as_str().to_string(),
+                    identifier,
                     property: related_property.as_str().to_string(),
                 })
             }
@@ -434,16 +618,35 @@ impl Visitor {
                     Rule::string => Ok(Expression::String(primary.as_str().to_string())),
                     Rule::relation => {
                         let mut pairs = primary.into_inner();
-                        let identifier = pairs.next().unwrap().as_str().to_string();
+                        let identifier_str = pairs.next().unwrap().as_str();
                         let property = pairs.next().unwrap().as_str().to_string();
+
+                        let identifier = self
+                            .aliases
+                            .get(identifier_str)
+                            .cloned()
+                            .unwrap_or_else(|| identifier_str.to_string());
+
                         Ok(Expression::Reference { identifier, property })
                     }
                     Rule::identifier => {
-                        let identifier = primary.as_str().to_string();
-                        Ok(Expression::Reference {
-                            identifier,
-                            property: "output".to_string(),
-                        })
+                        let identifier_str = primary.as_str();
+                        if let Some(value) = self.scope.get(identifier_str) {
+                            match value {
+                                Value::Numeric { value, .. } => Ok(Expression::Number(value.clone())),
+                                _ => unreachable!("Only numeric values are supported in expressions"),
+                            }
+                        } else {
+                            let identifier = self
+                                .aliases
+                                .get(identifier_str)
+                                .cloned()
+                                .unwrap_or_else(|| identifier_str.to_string());
+                            Ok(Expression::Reference {
+                                identifier,
+                                property: "output".to_string(),
+                            })
+                        }
                     }
                     Rule::expression => self.visit_expression(primary.into_inner()),
                     rule => unreachable!("unexpected primary rule: {:?}", rule),
@@ -557,6 +760,9 @@ impl<'a> NodeParser<'a> {
                     }
                     Rule::pipeline_result => {
                         self.visitor.visit_pipeline_result(pair)?;
+                    }
+                    Rule::for_loop => {
+                        self.visitor.visit_for_loop(pair)?;
                     }
                     Rule::input_def => {
                         self.visitor.visit_input_def(pair)?;
