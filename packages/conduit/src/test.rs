@@ -489,49 +489,36 @@ mod tests {
     #[test]
     fn test_all_numeric_types_inputs() {
         let inputs = input! {
-            v_u8: 1u8,
-            v_u16: 1u16,
-            v_u32: 1u32,
-            v_u64: 1u64,
-            v_u128: 1u128,
-            v_usize: 1usize,
-            v_i8: 1i8,
-            v_i16: 1i16,
-            v_i32: 1i32,
-            v_i64: 1i64,
-            v_i128: 1i128,
-            v_isize: 1isize,
-            v_f32: 1.0f32,
-            v_f64: 1.0f64
+            u8: 1u8,
+            u16: 1u16,
+            u32: 1u32,
+            u64: 1u64,
+            u128: 1u128,
+            usize: 1usize,
+            i8: 1i8,
+            i16: 1i16,
+            i32: 1i32,
+            i64: 1i64,
+            i128: 1i128,
+            isize: 1isize,
+            f32: 1.0f32,
+            f64: 1.0f64
         };
 
-        let output: String = pipeline! {inputs, r#"
-            -> v_u8
-            -> v_u16
-            -> v_u32
-            -> v_u64
-            -> v_u128
-            -> v_usize
-            -> v_i8
-            -> v_i16
-            -> v_i32
-            -> v_i64
-            -> v_i128
-            -> v_isize
-            -> v_f32
-            -> v_f64
+        let output: (u8, String) = pipeline! {inputs, r#"
+            -> u8 -> u16 -> u32 -> u64 -> u128 -> usize
+            -> i8 -> i16 -> i32 -> i64 -> i128 -> isize
+            -> f32 -> f64
 
             store _ {
-                res <- "init"
+                value <- (u8 + u16 + u32 + u64 + u128 + usize + i8 + i16 + i32 + i64 + i128 + isize + f32 + f64)
             }
 
-            # Just using them in expressions to verify they resolve correctly as Numerics
-            store::res <- "{ (v_u8 + v_u16 + v_u32 + v_u64 + v_u128 + v_usize + v_i8 + v_i16 + v_i32 + v_i64 + v_i128 + v_isize + v_f32 + v_f64) }"
-
-            <- store::res
+            <- store::value       # as numeric value
+            <- "{ store::value }" # as string
         "#};
 
         // 14 * 1 = 14
-        assert_eq!(output, "14");
+        assert_eq!(output, (14u8, "14".to_string()));
     }
 }
