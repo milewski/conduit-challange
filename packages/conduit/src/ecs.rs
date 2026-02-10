@@ -681,8 +681,8 @@ mod tests {
             .unwrap();
 
         assert!(dot.contains("digraph {"));
-        assert!(dot.contains("label = \"a\""));
-        assert!(dot.contains("label = \"b\""));
+        assert!(dot.contains("label=\"module_a (a)"));
+        assert!(dot.contains("label=\"module_b (b)"));
     }
 
     #[test]
