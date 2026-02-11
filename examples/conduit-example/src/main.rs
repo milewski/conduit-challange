@@ -1,14 +1,8 @@
-use conduit::Engine;
 use conduit::node::NodeError;
+use conduit::{Engine, input, try_pipeline};
 use conduit_derive::{NodeOutput, node};
 
 mod nodes;
-
-#[derive(NodeOutput)]
-struct Input {
-    width: u32,
-    height: u32,
-}
 
 #[node]
 async fn read_file(#[input] path: String) -> Result<Vec<u8>, NodeError> {
@@ -35,17 +29,15 @@ fn main() {
         }
     "#;
 
-    let mut engine = Engine::new();
-
-    let input = Input {
+    let input = input! {
         width: 123,
         height: 456,
     };
 
-    println!("{}", engine.generate_dot_graph(pipeline).unwrap());
+    let result: Result<Vec<u8>, _> = try_pipeline!(input, pipeline);
 
-    match engine.run_pipeline_blocking::<Input, Vec<u8>>(pipeline, input) {
-        Ok(data) => println!("Pipeline result: {} bytes image", data.len()),
+    match result {
+        Ok(data) => println!("{} bytes", data.len()),
         Err(e) => println!("Pipeline error: {}", e),
     }
 }

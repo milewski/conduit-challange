@@ -149,3 +149,25 @@ macro_rules! pipeline_result {
         engine.run_pipeline_blocking($pipeline, $input)
     }};
 }
+
+/// Public API macro to run a pipeline inline and return a Result (preferred public name).
+///
+/// Usage:
+/// ```rust,ignore
+/// use conduit::{try_pipeline, input};
+///
+/// // Let the compiler infer the output type via assignment:
+/// // let result: Result<String, _> = try_pipeline! { r#"<- "hello""# };
+/// ```
+#[macro_export]
+macro_rules! try_pipeline {
+    // Untyped variants: infer from context
+    ($input:expr, $pipeline:expr) => {{
+        let mut engine = $crate::Engine::new();
+        engine.run_pipeline_blocking($pipeline, $input)
+    }};
+
+    ($pipeline:expr) => {
+        $crate::try_pipeline!((), $pipeline)
+    };
+}
