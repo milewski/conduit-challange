@@ -1,10 +1,11 @@
-use crate::dsl::parser::{Direction, Identifier, NodeInstruct, StringPart, Value};
+use crate::dsl::parser::{Direction, EventCallback, Identifier, NodeInstruct, StringPart, Value};
 use petgraph::Direction as GraphDirection;
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{BTreeMap, HashMap};
 
 pub(super) fn build_dependency_graph(
     nodes: &BTreeMap<Identifier, NodeInstruct>,
+    event_handlers: &BTreeMap<Identifier, BTreeMap<String, Vec<EventCallback>>>,
     sequential_edges: &[(Identifier, Identifier)],
 ) -> (DiGraph<Identifier, String>, HashMap<Identifier, NodeIndex>) {
     let mut graph = DiGraph::new();
@@ -69,6 +70,8 @@ pub(super) fn build_dependency_graph(
     for (from_identifier, to_identifier) in sequential_edges {
         add_dependency_edge(&mut graph, &index_map, from_identifier, to_identifier, "__sequence__");
     }
+
+    add_event_callback_edges(&mut graph, &index_map, event_handlers);
 
     (graph, index_map)
 }
@@ -166,5 +169,121 @@ fn collect_tuple_references(
             }
         }
         _ => {}
+    }
+}
+
+fn add_event_callback_edges(
+    graph: &mut DiGraph<Identifier, String>,
+    index_map: &HashMap<Identifier, NodeIndex>,
+    event_handlers: &BTreeMap<Identifier, BTreeMap<String, Vec<EventCallback>>>,
+) {
+    for (source_identifier, handlers_by_event) in event_handlers {
+        for callbacks in handlers_by_event.values() {
+            for callback in callbacks {
+                let _ = add_event_callback_edge_for_callback(graph, index_map, source_identifier, callback);
+            }
+        }
+    }
+}
+
+fn add_event_callback_edge_for_callback(
+    graph: &mut DiGraph<Identifier, String>,
+    index_map: &HashMap<Identifier, NodeIndex>,
+    source_identifier: &str,
+    callback: &EventCallback,
+) -> Option<Identifier> {
+    match callback {
+        EventCallback::Value(value) | EventCallback::PipedValue(value) => {
+            if let Value::Relation { identifier, .. } = value {
+                add_dependency_edge(graph, index_map, source_identifier, identifier, "__event__");
+                return Some(identifier.clone());
+            }
+            None
+        }
+        EventCallback::Assignment(_) => None,
+        EventCallback::Block(callbacks) => {
+            let mut previous_identifier = source_identifier.to_string();
+            let mut last_target = None;
+
+            for nested_callback in callbacks {
+                if let Some(target_identifier) =
+                    add_event_callback_edge_for_callback(graph, index_map, &previous_identifier, nested_callback)
+                {
+                    previous_identifier = target_identifier.clone();
+                    last_target = Some(target_identifier);
+                }
+            }
+
+            last_target
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dsl::parser::NodeParser;
+    use petgraph::visit::EdgeRef;
+
+    #[test]
+    fn test_event_callbacks_create_dependency_edges() {
+        let workflow = NodeParser::parse(
+            r#"
+            first_prompt prompt {
+                <- "width"
+                on answer width {
+                    second_prompt prompt {
+                        <- "height"
+                        on answer height {
+                            config _ {
+                                width <- width
+                                height <- height
+                            }
+                        }
+                    }
+                }
+            }
+
+            resizer task {
+                width <- config::width
+                height <- config::height
+            }
+        "#,
+        )
+        .expect("workflow should parse");
+
+        let (graph, index_map) =
+            build_dependency_graph(&workflow.nodes, &workflow.event_handlers, &workflow.sequential_edges);
+
+        let first_prompt_index = *index_map
+            .get("first_prompt")
+            .expect("first_prompt should exist in graph");
+
+        let second_prompt_index = *index_map
+            .get("second_prompt")
+            .expect("second_prompt should exist in graph");
+
+        let config_index = *index_map.get("config").expect("config should exist in graph");
+        let resizer_index = *index_map.get("resizer").expect("resizer should exist in graph");
+
+        let edge_pairs: Vec<(NodeIndex, NodeIndex)> = graph
+            .edge_references()
+            .map(|edge_reference| (edge_reference.source(), edge_reference.target()))
+            .collect();
+
+        assert!(
+            edge_pairs.contains(&(first_prompt_index, second_prompt_index)),
+            "first prompt should depend into second prompt callback node"
+        );
+
+        assert!(
+            edge_pairs.contains(&(second_prompt_index, config_index)),
+            "second prompt should depend into callback-created config node"
+        );
+
+        assert!(
+            edge_pairs.contains(&(config_index, resizer_index)),
+            "resizer should depend on callback-created config node"
+        );
     }
 }

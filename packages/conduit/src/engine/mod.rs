@@ -83,12 +83,12 @@ impl Engine {
         let ParsedWorkflow {
             nodes,
             inputs,
-            event_handlers: _,
+            event_handlers,
             event_callback_nodes: _,
             sequential_edges,
         } = NodeParser::parse(workflow).map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?;
 
-        let (graph, _) = build_dependency_graph(&nodes, &sequential_edges);
+        let (graph, _) = build_dependency_graph(&nodes, &event_handlers, &sequential_edges);
 
         let get_node_attributes = |_, (_, id): (_, &Identifier)| {
             if let Some(instruct) = nodes.get(id) {
@@ -196,7 +196,7 @@ impl Engine {
 
         let has_result = nodes.contains_key(PIPELINE_RESULT_ID);
 
-        let (graph, _) = build_dependency_graph(&nodes, &sequential_edges);
+        let (graph, _) = build_dependency_graph(&nodes, &event_handlers, &sequential_edges);
         let levels = compute_execution_levels(&graph);
 
         let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
