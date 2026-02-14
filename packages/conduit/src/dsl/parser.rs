@@ -78,6 +78,7 @@ pub struct CallbackAssignment {
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub enum EventCallback {
     Value(Value),
+    PipedValue(Value),
     Assignment(CallbackAssignment),
     Block(Vec<EventCallback>),
 }
@@ -134,6 +135,7 @@ struct Schema;
 pub type Identifier = String;
 pub type Property = String;
 pub const EVENT_PAYLOAD_IDENTIFIER: &str = "__event_payload__";
+pub const EVENT_ALIAS_IDENTIFIER_PREFIX: &str = "__event_alias__";
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct NodeInstruct {
@@ -263,14 +265,27 @@ impl Visitor {
         })
     }
 
-    fn parse_event_callback(&mut self, event_callback: Pair<Rule>) -> Result<EventCallback, ParserError> {
-        assert_eq!(event_callback.as_rule(), Rule::event_callback);
-        let callback_inner = event_callback.into_inner().next().unwrap_or_else(|| unreachable!());
+    fn parse_event_callback(
+        &mut self,
+        event_callback: Pair<Rule>,
+        is_piped: bool,
+    ) -> Result<EventCallback, ParserError> {
+        let callback_inner = if event_callback.as_rule() == Rule::event_callback {
+            event_callback.into_inner().next().unwrap_or_else(|| unreachable!())
+        } else {
+            event_callback
+        };
 
         match callback_inner.as_rule() {
             Rule::value => {
                 let callback_value_pair = callback_inner.into_inner().next().unwrap_or_else(|| unreachable!());
                 let callback_value_rule = callback_value_pair.as_rule();
+                let existing_node_identifiers: HashSet<Identifier> =
+                    if matches!(callback_value_rule, Rule::node | Rule::anonymous_node) {
+                        self.nodes.keys().cloned().collect()
+                    } else {
+                        HashSet::new()
+                    };
                 let mut callback_value = self.visit_value(callback_value_pair, Direction::Input)?;
 
                 if let Value::Relation {
@@ -293,14 +308,22 @@ impl Visitor {
                     }
 
                     if matches!(callback_value_rule, Rule::node | Rule::anonymous_node) {
-                        self.event_callback_nodes.insert(identifier.clone());
+                        for node_identifier in self.nodes.keys() {
+                            if !existing_node_identifiers.contains(node_identifier) {
+                                self.event_callback_nodes.insert(node_identifier.clone());
+                            }
+                        }
                         if *direction == Direction::Input && property == "output" {
                             *property = "input".to_string();
                         }
                     }
                 }
 
-                Ok(EventCallback::Value(callback_value))
+                if is_piped {
+                    Ok(EventCallback::PipedValue(callback_value))
+                } else {
+                    Ok(EventCallback::Value(callback_value))
+                }
             }
             Rule::callback_block => {
                 let mut callbacks = Vec::new();
@@ -312,17 +335,20 @@ impl Visitor {
                             callbacks.push(EventCallback::Assignment(self.parse_callback_assignment(statement)?));
                         }
                         Rule::node | Rule::anonymous_node => {
+                            let existing_node_identifiers: HashSet<Identifier> = self.nodes.keys().cloned().collect();
                             let mut node_value = self.visit_value(statement, Direction::Input)?;
                             if let Value::Relation {
-                                identifier,
-                                direction,
-                                property,
+                                direction, property, ..
                             } = &mut node_value
                             {
                                 if *direction == Direction::Input && property == "output" {
                                     *property = "input".to_string();
                                 }
-                                self.event_callback_nodes.insert(identifier.clone());
+                                for node_identifier in self.nodes.keys() {
+                                    if !existing_node_identifiers.contains(node_identifier) {
+                                        self.event_callback_nodes.insert(node_identifier.clone());
+                                    }
+                                }
                             }
                             callbacks.push(EventCallback::Value(node_value));
                         }
@@ -348,14 +374,23 @@ impl Visitor {
             _ => unreachable!(),
         };
 
-        let next_pair = pairs.next().unwrap_or_else(|| unreachable!());
-        let (event_payload_alias, callback_pair) = if next_pair.as_rule() == Rule::event_payload_alias {
-            (
-                Some(next_pair.as_str().to_string()),
-                pairs.next().unwrap_or_else(|| unreachable!()),
-            )
-        } else {
-            (None, next_pair)
+        let handler_pair = pairs.next().unwrap_or_else(|| unreachable!());
+        let (event_payload_alias, callback_pair, is_piped) = match handler_pair.as_rule() {
+            Rule::event_handler_pipe => {
+                let callback_pair = handler_pair.into_inner().next().unwrap_or_else(|| unreachable!());
+                (None, callback_pair, true)
+            }
+            Rule::event_handler_block => {
+                let mut handler_pairs = handler_pair.into_inner();
+                let first_pair = handler_pairs.next().unwrap_or_else(|| unreachable!());
+                if first_pair.as_rule() == Rule::event_payload_alias {
+                    let callback_block = handler_pairs.next().unwrap_or_else(|| unreachable!());
+                    (Some(first_pair.as_str().to_string()), callback_block, false)
+                } else {
+                    (None, first_pair, false)
+                }
+            }
+            _ => unreachable!(),
         };
 
         let default_event_payload_alias = if event_names.len() == 1 {
@@ -365,12 +400,17 @@ impl Visitor {
         };
 
         let payload_alias_to_use = event_payload_alias.or(default_event_payload_alias);
+        let alias_storage_identifier = payload_alias_to_use
+            .as_ref()
+            .map(|payload_alias| format!("{}{}_{}", EVENT_ALIAS_IDENTIFIER_PREFIX, payload_alias, Uuid::new_v4()));
 
-        let previous_scope_value = if let Some(payload_alias) = payload_alias_to_use.as_ref() {
+        let previous_scope_value = if let (Some(payload_alias), Some(alias_storage_identifier)) =
+            (payload_alias_to_use.as_ref(), alias_storage_identifier.as_ref())
+        {
             self.scope.insert(
                 payload_alias.clone(),
                 Value::Relation {
-                    identifier: EVENT_PAYLOAD_IDENTIFIER.to_string(),
+                    identifier: alias_storage_identifier.clone(),
                     direction: Direction::Input,
                     property: "value".to_string(),
                 },
@@ -379,7 +419,27 @@ impl Visitor {
             None
         };
 
-        let parsed_callback = self.parse_event_callback(callback_pair)?;
+        let mut parsed_callback = self.parse_event_callback(callback_pair, is_piped)?;
+
+        if let Some(alias_storage_identifier) = alias_storage_identifier {
+            let alias_capture_assignment = EventCallback::Assignment(CallbackAssignment {
+                identifier: alias_storage_identifier,
+                property: "value".to_string(),
+                value: Value::Relation {
+                    identifier: EVENT_PAYLOAD_IDENTIFIER.to_string(),
+                    direction: Direction::Input,
+                    property: "value".to_string(),
+                },
+            });
+
+            parsed_callback = match parsed_callback {
+                EventCallback::Block(mut callbacks) => {
+                    callbacks.insert(0, alias_capture_assignment);
+                    EventCallback::Block(callbacks)
+                }
+                callback => EventCallback::Block(vec![alias_capture_assignment, callback]),
+            };
+        }
 
         if let Some(payload_alias) = payload_alias_to_use {
             if let Some(previous_scope_value) = previous_scope_value {
@@ -1096,6 +1156,9 @@ impl Visitor {
                 if identifier == EVENT_PAYLOAD_IDENTIFIER {
                     return;
                 }
+                if identifier.starts_with(EVENT_ALIAS_IDENTIFIER_PREFIX) {
+                    return;
+                }
 
                 updates.push((
                     identifier.clone(),
@@ -1470,7 +1533,7 @@ mod tests {
             store _ { counter <- 0 }
             source task {
                 count <- 1
-                on done payload -> {
+                on done payload {
                     store::counter <- payload
                 }
             }

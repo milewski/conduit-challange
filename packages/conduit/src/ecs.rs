@@ -386,6 +386,189 @@ async fn execute_node_with_streaming_events(
     Ok(())
 }
 
+fn collect_output_targets(value: &Value, output_targets: &mut Vec<Identifier>) {
+    match value {
+        Value::Relation {
+            identifier, direction, ..
+        } => {
+            if *direction == Direction::Output {
+                output_targets.push(identifier.clone());
+            }
+        }
+        Value::Tuple { values, .. } => {
+            for tuple_value in values {
+                collect_output_targets(tuple_value, output_targets);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_input_dependency_targets(value: &Value, input_dependency_targets: &mut Vec<Identifier>) {
+    match value {
+        Value::Relation {
+            identifier, direction, ..
+        } => {
+            if *direction == Direction::Input {
+                input_dependency_targets.push(identifier.clone());
+            }
+        }
+        Value::String { parts, .. } => {
+            for part in parts {
+                if let StringPart::Interpolation(expression) = part {
+                    for (reference_identifier, _) in collect_expression_references(expression) {
+                        input_dependency_targets.push(reference_identifier.to_string());
+                    }
+                }
+            }
+        }
+        Value::Expression { value, .. } => {
+            for (reference_identifier, _) in collect_expression_references(value) {
+                input_dependency_targets.push(reference_identifier.to_string());
+            }
+        }
+        Value::Tuple { values, .. } => {
+            for tuple_value in values {
+                collect_input_dependency_targets(tuple_value, input_dependency_targets);
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn execute_callback_dependencies(
+    registry: &Arc<NodeRegistry>,
+    nodes: &BTreeMap<Identifier, NodeInstruct>,
+    input_names: &std::collections::HashSet<String>,
+    outputs: &mut HashMap<Identifier, HashMap<String, SharedValue>>,
+    all_event_handlers: &BTreeMap<Identifier, BTreeMap<String, Vec<EventCallback>>>,
+    node_identifier: &Identifier,
+    visited_identifiers: &mut HashSet<Identifier>,
+) -> Result<(), crate::node::NodeError> {
+    if !visited_identifiers.insert(node_identifier.clone()) {
+        return Ok(());
+    }
+
+    let Some(node) = nodes.get(node_identifier) else {
+        return Ok(());
+    };
+
+    let mut input_dependency_targets = Vec::new();
+    for input_value in node.inputs.values() {
+        collect_input_dependency_targets(input_value, &mut input_dependency_targets);
+    }
+
+    for input_dependency_target in input_dependency_targets {
+        if outputs.contains_key(&input_dependency_target) {
+            continue;
+        }
+
+        let Some(dependency_node) = nodes.get(&input_dependency_target) else {
+            continue;
+        };
+        if dependency_node.module == "_" || !registry.has(&dependency_node.module) {
+            continue;
+        }
+
+        Box::pin(execute_callback_dependencies(
+            registry,
+            nodes,
+            input_names,
+            outputs,
+            all_event_handlers,
+            &input_dependency_target,
+            visited_identifiers,
+        ))
+        .await?;
+
+        let dependency_payload = resolve_inputs(dependency_node, outputs, nodes, input_names)?;
+        execute_node_with_streaming_events(
+            registry,
+            nodes,
+            input_names,
+            outputs,
+            all_event_handlers,
+            all_event_handlers.get(&input_dependency_target),
+            &input_dependency_target,
+            dependency_node,
+            dependency_payload,
+        )
+        .await?;
+
+        Box::pin(execute_output_chained_nodes(
+            registry,
+            nodes,
+            input_names,
+            outputs,
+            all_event_handlers,
+            &input_dependency_target,
+            visited_identifiers,
+        ))
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn execute_output_chained_nodes(
+    registry: &Arc<NodeRegistry>,
+    nodes: &BTreeMap<Identifier, NodeInstruct>,
+    input_names: &std::collections::HashSet<String>,
+    outputs: &mut HashMap<Identifier, HashMap<String, SharedValue>>,
+    all_event_handlers: &BTreeMap<Identifier, BTreeMap<String, Vec<EventCallback>>>,
+    source_identifier: &Identifier,
+    visited_identifiers: &mut HashSet<Identifier>,
+) -> Result<(), crate::node::NodeError> {
+    if !visited_identifiers.insert(source_identifier.clone()) {
+        return Ok(());
+    }
+
+    let Some(source_node) = nodes.get(source_identifier) else {
+        return Ok(());
+    };
+
+    let mut output_targets = Vec::new();
+    for input_value in source_node.inputs.values() {
+        collect_output_targets(input_value, &mut output_targets);
+    }
+
+    for output_target in output_targets {
+        let Some(target_node) = nodes.get(&output_target) else {
+            continue;
+        };
+        if target_node.module == "_" || !registry.has(&target_node.module) {
+            continue;
+        }
+
+        let target_payload = resolve_inputs(target_node, outputs, nodes, input_names)?;
+        execute_node_with_streaming_events(
+            registry,
+            nodes,
+            input_names,
+            outputs,
+            all_event_handlers,
+            all_event_handlers.get(&output_target),
+            &output_target,
+            target_node,
+            target_payload,
+        )
+        .await?;
+
+        Box::pin(execute_output_chained_nodes(
+            registry,
+            nodes,
+            input_names,
+            outputs,
+            all_event_handlers,
+            &output_target,
+            visited_identifiers,
+        ))
+        .await?;
+    }
+
+    Ok(())
+}
+
 async fn run_event_callbacks(
     registry: &Arc<NodeRegistry>,
     nodes: &BTreeMap<Identifier, NodeInstruct>,
@@ -406,21 +589,33 @@ async fn run_event_callbacks(
     }
 
     while let Some((event_callback, event_payload)) = queued_callbacks.pop_front() {
-        if let Some(payload_value) = event_payload.clone() {
-            outputs
-                .entry(EVENT_PAYLOAD_IDENTIFIER.to_string())
-                .or_default()
-                .insert("value".to_string(), payload_value);
-        }
+        let payload_value = event_payload.clone().unwrap_or_else(|| Arc::new(()) as SharedValue);
+
+        outputs
+            .entry(EVENT_PAYLOAD_IDENTIFIER.to_string())
+            .or_default()
+            .insert("value".to_string(), payload_value);
 
         match event_callback {
-            EventCallback::Value(callback_value) => {
+            EventCallback::PipedValue(callback_value) => {
                 if let Value::Relation {
                     identifier, property, ..
                 } = callback_value
                 {
                     if let Some(callback_node) = nodes.get(&identifier) {
                         if callback_node.module != "_" && registry.has(&callback_node.module) {
+                            let mut dependency_visited_identifiers = HashSet::new();
+                            Box::pin(execute_callback_dependencies(
+                                registry,
+                                nodes,
+                                input_names,
+                                outputs,
+                                all_event_handlers,
+                                &identifier,
+                                &mut dependency_visited_identifiers,
+                            ))
+                            .await?;
+
                             let mut callback_payload = resolve_inputs(callback_node, outputs, nodes, input_names)?;
 
                             if let Some(value) = event_payload.clone() {
@@ -437,6 +632,73 @@ async fn run_event_callbacks(
                                 &identifier,
                                 callback_node,
                                 callback_payload,
+                            ))
+                            .await?;
+
+                            let mut visited_identifiers = HashSet::new();
+                            Box::pin(execute_output_chained_nodes(
+                                registry,
+                                nodes,
+                                input_names,
+                                outputs,
+                                all_event_handlers,
+                                &identifier,
+                                &mut visited_identifiers,
+                            ))
+                            .await?;
+                        } else if let Some(value) = event_payload.clone() {
+                            outputs.entry(identifier).or_default().insert(property, value);
+                        }
+                    } else if let Some(value) = event_payload.clone() {
+                        outputs.entry(identifier).or_default().insert(property, value);
+                    }
+                } else {
+                    let _ = resolve_single_value(&callback_value, outputs, nodes, input_names)?;
+                }
+            }
+            EventCallback::Value(callback_value) => {
+                if let Value::Relation {
+                    identifier, property, ..
+                } = callback_value
+                {
+                    if let Some(callback_node) = nodes.get(&identifier) {
+                        if callback_node.module != "_" && registry.has(&callback_node.module) {
+                            let mut dependency_visited_identifiers = HashSet::new();
+                            Box::pin(execute_callback_dependencies(
+                                registry,
+                                nodes,
+                                input_names,
+                                outputs,
+                                all_event_handlers,
+                                &identifier,
+                                &mut dependency_visited_identifiers,
+                            ))
+                            .await?;
+
+                            let callback_payload = resolve_inputs(callback_node, outputs, nodes, input_names)?;
+
+                            Box::pin(execute_node_with_streaming_events(
+                                registry,
+                                nodes,
+                                input_names,
+                                outputs,
+                                all_event_handlers,
+                                all_event_handlers.get(&identifier),
+                                &identifier,
+                                callback_node,
+                                callback_payload,
+                            ))
+                            .await?;
+
+                            let mut visited_identifiers = HashSet::new();
+                            Box::pin(execute_output_chained_nodes(
+                                registry,
+                                nodes,
+                                input_names,
+                                outputs,
+                                all_event_handlers,
+                                &identifier,
+                                &mut visited_identifiers,
                             ))
                             .await?;
                         } else if let Some(value) = event_payload.clone() {

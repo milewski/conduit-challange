@@ -153,7 +153,7 @@ fn test_event_callback_uses_explicit_payload_alias() {
 
         task {
             count <- 2
-            on done current -> {
+            on done current {
                 store::counter <- current
             }
         }
@@ -191,4 +191,126 @@ fn test_parenthesized_nodes_run_sequentially() {
     "#};
 
     assert_eq!(output, 10);
+}
+
+#[test]
+fn test_block_callback_node_does_not_receive_event_payload_implicitly() {
+    #[functional_node]
+    fn as_text(#[input] input: String) -> String {
+        input
+    }
+
+    let output: u32 = pipeline! {r#"
+        store _ {
+            counter <- 0
+        }
+
+        task {
+            count <- 1
+            on done value {
+                latest_text as_text {
+                    <- "ok"
+                }
+                store::counter <- value
+            }
+        }
+
+        <- store::counter
+    "#};
+
+    assert_eq!(output, 1);
+}
+
+#[test]
+fn test_nested_event_payload_aliases_are_captured_correctly() {
+    #[derive(NodeEvent)]
+    enum PromptEvent {
+        Answer { value: u32 },
+    }
+
+    #[functional_node]
+    async fn first_prompt(emitter: Emitter<PromptEvent>) {
+        emitter.emit(PromptEvent::Answer { value: 5 }).await;
+    }
+
+    #[functional_node]
+    async fn second_prompt(emitter: Emitter<PromptEvent>) {
+        emitter.emit(PromptEvent::Answer { value: 8 }).await;
+    }
+
+    let output: (u32, u32) = pipeline! {r#"
+        store _ {
+            width <- 0
+            height <- 0
+        }
+
+        first_prompt {
+            on answer width {
+                second_prompt {
+                    on answer height {
+                        store::width <- width
+                        store::height <- height
+                    }
+                }
+            }
+        }
+
+        <- store::width
+        <- store::height
+    "#};
+
+    assert_eq!(output, (5, 8));
+}
+
+#[test]
+fn test_callback_block_executes_nested_output_chain() {
+    let output: u32 = pipeline! {r#"
+        task {
+            count <- 1
+            on done value {
+                adder {
+                    a <- value
+                    b <- 2
+                    -> echo {}
+                }
+            }
+        }
+
+        <- 1
+    "#};
+
+    assert_eq!(output, 1);
+}
+
+#[test]
+fn test_callback_block_executes_input_dependencies_before_node() {
+    #[functional_node]
+    fn produce_value() -> u32 {
+        7
+    }
+
+    #[functional_node]
+    fn consume_value(#[input] input: u32) -> u32 {
+        input
+    }
+
+    let output: u32 = pipeline! {r#"
+        store _ {
+            seen <- 0
+        }
+
+        task {
+            count <- 1
+            on done value {
+                result consume_value {
+                    <- produce_value {}
+                }
+                store::seen <- result
+            }
+        }
+
+        <- store::seen
+    "#};
+
+    assert_eq!(output, 7);
 }

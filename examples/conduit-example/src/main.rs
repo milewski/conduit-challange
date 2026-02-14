@@ -1,8 +1,8 @@
+use std::io::Write;
 use conduit::node::NodeError;
 use conduit::traits::Emitter;
 use conduit::try_pipeline;
 use conduit_derive::{NodeEvent, node};
-use std::io::Write;
 
 mod nodes;
 
@@ -40,32 +40,26 @@ async fn prompt(#[input] question: String, emitter: Emitter<PromptEvents>) -> Re
 
 fn main() {
     let pipeline = r#"
-        store _ {
-            width <- 0
-            height <- 0
-        }
-
         prompt {
             <- "Enter the desired width?"
             on answer width {
                 prompt {
                     <- "Enter the desired height?"
                     on answer height {
-                        store::width <- width
-                        store::height <- width
+                        resizer resizer {
+                            <- read_file <- "./examples/conduit-example/cover.png"
+                            width <- width
+                            height <- height
+                            -> write_file {
+                                destination <- "./examples/conduit-example/cover.example.png"
+                            }
+                        }
                     }
                 }
             }
         }
 
-        <- resizer {
-            <- read_file <- "./examples/conduit-example/cover.png"
-            width <- store::width
-            height <- store::height
-            -> write_file {
-                destination <- "./examples/conduit-example/cover.example.png"
-            }
-        }
+        <- resizer
     "#;
 
     let result: Result<Vec<u8>, _> = try_pipeline!(pipeline);

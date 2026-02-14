@@ -21,9 +21,11 @@ parameter = { parameter_target? ~ direction ~ value }
 parameter_target = { property | property_list }
 property_list = { "[" ~ property ~ ("," ~ property)+ ~ "]" }
 
-event_handler = { "on" ~ event_names ~ event_payload_alias? ~ "->" ~ event_callback }
+event_handler = { "on" ~ event_names ~ (event_handler_pipe | event_handler_block) }
 event_names = { identifier | "[" ~ identifier ~ ("," ~ identifier)* ~ "]" }
 event_payload_alias = { identifier }
+event_handler_pipe = { "->" ~ event_callback }
+event_handler_block = { event_payload_alias? ~ callback_block }
 event_callback = { callback_block | value }
 
 callback_block = { "{" ~ NEWLINE* ~ (callback_statement ~ NEWLINE*)* ~ "}" }
