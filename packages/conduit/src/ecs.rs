@@ -308,14 +308,14 @@ async fn run_event_callbacks(
     outputs: &mut HashMap<Identifier, HashMap<String, SharedValue>>,
     all_event_handlers: &BTreeMap<Identifier, BTreeMap<String, Vec<EventCallback>>>,
     event_handlers: Option<&BTreeMap<String, Vec<EventCallback>>>,
-    emitted_events: Vec<crate::traits::EmittedEvent>,
+    emitted_events: Vec<crate::traits::EventData>,
 ) -> Result<(), crate::node::NodeError> {
     let mut queued_callbacks: VecDeque<(EventCallback, Option<SharedValue>)> = VecDeque::new();
 
     for emitted_event in emitted_events {
         if let Some(callbacks) = event_handlers.and_then(|handlers| handlers.get(&emitted_event.name)) {
             for callback in callbacks {
-                queued_callbacks.push_back((callback.clone(), emitted_event.data.clone()));
+                queued_callbacks.push_back((callback.clone(), emitted_event.value.clone()));
             }
         }
     }
@@ -352,7 +352,7 @@ async fn run_event_callbacks(
                                     .and_then(|handlers| handlers.get(&emitted_event.name))
                                 {
                                     for callback in callbacks {
-                                        queued_callbacks.push_back((callback.clone(), emitted_event.data.clone()));
+                                        queued_callbacks.push_back((callback.clone(), emitted_event.value.clone()));
                                     }
                                 }
                             }

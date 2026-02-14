@@ -141,22 +141,48 @@ impl_as_input_identity!(Vec<String>);
 impl_as_input_identity!(Vec<&'static str>);
 
 #[derive(Clone)]
-pub struct EmittedEvent {
+pub struct EventData {
     pub name: String,
-    pub data: Option<SharedValue>,
+    pub value: Option<SharedValue>,
+}
+
+impl EventData {
+    pub fn with_value(name: impl Into<String>, value: impl Any + Send + Sync + 'static) -> Self {
+        Self {
+            name: name.into(),
+            value: Some(Arc::new(value)),
+        }
+    }
+
+    pub fn without_value(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            value: None,
+        }
+    }
+}
+
+pub trait NodeEvent: Send + Sync + 'static {
+    fn into_parts(self) -> EventData;
+}
+
+impl NodeEvent for () {
+    fn into_parts(self) -> EventData {
+        EventData::without_value(String::new())
+    }
 }
 
 pub struct Emitter<Event>
 where
-    Event: Into<String> + Send + Sync + 'static,
+    Event: NodeEvent,
 {
-    events: Arc<Mutex<Vec<EmittedEvent>>>,
+    events: Arc<Mutex<Vec<EventData>>>,
     marker: PhantomData<Event>,
 }
 
 impl<Event> Clone for Emitter<Event>
 where
-    Event: Into<String> + Send + Sync + 'static,
+    Event: NodeEvent,
 {
     fn clone(&self) -> Self {
         Self {
@@ -168,7 +194,7 @@ where
 
 impl<Event> Default for Emitter<Event>
 where
-    Event: Into<String> + Send + Sync + 'static,
+    Event: NodeEvent,
 {
     fn default() -> Self {
         Self {
@@ -180,21 +206,14 @@ where
 
 impl<Event> Emitter<Event>
 where
-    Event: Into<String> + Send + Sync + 'static,
+    Event: NodeEvent,
 {
-    pub async fn emit<T>(&self, event: Event, data: Option<T>)
-    where
-        T: Any + Send + Sync + 'static,
-    {
-        let payload = data.map(|value| Arc::new(value) as SharedValue);
+    pub async fn emit(&self, event: Event) {
         let mut events = self.events.lock().expect("event emitter mutex poisoned");
-        events.push(EmittedEvent {
-            name: event.into(),
-            data: payload,
-        });
+        events.push(event.into_parts());
     }
 
-    pub fn into_events(self) -> Vec<EmittedEvent> {
+    pub fn into_events(self) -> Vec<EventData> {
         let mut events = self.events.lock().expect("event emitter mutex poisoned");
         std::mem::take(&mut *events)
     }
@@ -202,7 +221,7 @@ where
 
 pub struct NodeExecutionResult {
     pub outputs: Vec<(&'static str, SharedValue)>,
-    pub events: Vec<EmittedEvent>,
+    pub events: Vec<EventData>,
 }
 
 // -- User-facing trait (not object-safe) --
@@ -213,7 +232,7 @@ pub struct NodeExecutionResult {
 pub trait ExecutableNode: Send + Sync + 'static {
     type Input: NodeInput;
     type Output: NodeOutput;
-    type Event: Into<String> + Send + Sync + 'static;
+    type Event: NodeEvent;
 
     async fn run(&self, input: Self::Input, emitter: Emitter<Self::Event>) -> Result<Self::Output, NodeError>;
 }

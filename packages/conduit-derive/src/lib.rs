@@ -172,7 +172,7 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
         impl conduit::traits::ExecutableNode for #struct_name {
             type Input = #struct_name_input;
             type Output = #output_ty;
-            type Event = String;
+            type Event = ();
 
             async fn run(
                 &self,

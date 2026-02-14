@@ -1,6 +1,6 @@
 use crate::functional_node;
 use crate::node::NodeError;
-use crate::traits::{Emitter, ExecutableNode};
+use crate::traits::{Emitter, EventData, ExecutableNode, NodeEvent};
 use async_trait::async_trait;
 use conduit_derive::{Node, NodeInput};
 
@@ -26,19 +26,19 @@ async fn sleep(#[input] duration: u64) {
 
 #[derive(Debug)]
 enum Events {
-    Done,
-    Complete,
-    Error,
-    Message,
+    Done { current_count: u32 },
+    Complete { value: u32 },
+    Error { value: u32 },
+    Message { value: u32 },
 }
 
-impl From<Events> for String {
-    fn from(value: Events) -> Self {
-        match value {
-            Events::Done => "done".to_string(),
-            Events::Complete => "complete".to_string(),
-            Events::Error => "error".to_string(),
-            Events::Message => "message".to_string(),
+impl NodeEvent for Events {
+    fn into_parts(self) -> EventData {
+        match self {
+            Events::Done { current_count } => EventData::with_value("done", current_count),
+            Events::Complete { value } => EventData::with_value("complete", value),
+            Events::Error { value } => EventData::with_value("error", value),
+            Events::Message { value } => EventData::with_value("message", value),
         }
     }
 }
@@ -59,11 +59,11 @@ impl ExecutableNode for Task {
 
     async fn run(&self, input: Self::Input, emitter: Emitter<Self::Event>) -> Result<Self::Output, NodeError> {
         for current_count in 1..=input.count {
-            emitter.emit(Events::Done, Some(current_count)).await;
+            emitter.emit(Events::Done { current_count }).await;
         }
-        emitter.emit(Events::Complete, Some(10u32)).await;
-        emitter.emit(Events::Error, Some(20u32)).await;
-        emitter.emit(Events::Message, Some(30u32)).await;
+        emitter.emit(Events::Complete { value: 10 }).await;
+        emitter.emit(Events::Error { value: 20 }).await;
+        emitter.emit(Events::Message { value: 30 }).await;
         Ok(())
     }
 }
