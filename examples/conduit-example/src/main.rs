@@ -22,7 +22,7 @@ enum PromptEvents {
 }
 
 #[node]
-async fn prompt(question: String, emitter: Emitter<PromptEvents>) -> Result<(), NodeError> {
+async fn prompt(#[input] question: String, emitter: Emitter<PromptEvents>) -> Result<(), NodeError> {
     print!("{} ", question);
     std::io::stdout().flush().map_err(NodeError::from)?;
 
@@ -46,18 +46,15 @@ fn main() {
         }
 
         prompt {
-            question <- "Enter the desired width?"
-            # if no value is associated to the name of the event is also the name of the param passed to the callback function, it is only availiable within this block and cannot polute / or be used else where
-            on answer -> {
-                store::width <- answer
-            }
-        }
-
-        prompt {
-            question <- "Enter the desired height?"
-            # the param of the answer can also be manually provided by defining the name you want to call it in the example bellow value
-            on answer value -> {
-                store::height <- value
+            <- "Enter the desired width?"
+            on answer width {
+                prompt {
+                    <- "Enter the desired height?"
+                    on answer height {
+                        store::width <- width
+                        store::height <- width
+                    }
+                }
             }
         }
 

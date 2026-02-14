@@ -83,9 +83,10 @@ impl Engine {
             inputs,
             event_handlers: _,
             event_callback_nodes: _,
+            sequential_edges,
         } = NodeParser::parse(workflow).map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?;
 
-        let (graph, _) = build_dependency_graph(&nodes);
+        let (graph, _) = build_dependency_graph(&nodes, &sequential_edges);
 
         let get_node_attributes = |_, (_, id): (_, &Identifier)| {
             if let Some(instruct) = nodes.get(id) {
@@ -165,6 +166,7 @@ impl Engine {
             inputs,
             event_handlers,
             event_callback_nodes,
+            sequential_edges,
         } = NodeParser::new(workflow)
             .map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?
             .with_inputs(runtime_inputs.clone())
@@ -192,7 +194,7 @@ impl Engine {
 
         let has_result = nodes.contains_key(PIPELINE_RESULT_ID);
 
-        let (graph, _) = build_dependency_graph(&nodes);
+        let (graph, _) = build_dependency_graph(&nodes, &sequential_edges);
         let levels = compute_execution_levels(&graph);
 
         let mut outputs: HashMap<Identifier, HashMap<String, SharedValue>> = HashMap::new();
@@ -472,6 +474,7 @@ async fn run_event_callbacks(
 /// Edges point from dependency → dependent (data flow direction).
 fn build_dependency_graph(
     nodes: &BTreeMap<Identifier, NodeInstruct>,
+    sequential_edges: &[(Identifier, Identifier)],
 ) -> (DiGraph<Identifier, String>, HashMap<Identifier, NodeIndex>) {
     let mut graph = DiGraph::new();
     let mut index_map = HashMap::new();
@@ -518,6 +521,10 @@ fn build_dependency_graph(
                 _ => {}
             }
         }
+    }
+
+    for (from_identifier, to_identifier) in sequential_edges {
+        add_dependency_edge(&mut graph, &index_map, from_identifier, to_identifier, "__sequence__");
     }
 
     (graph, index_map)
@@ -892,7 +899,7 @@ mod tests {
         )
         .unwrap();
 
-        let (graph, _) = build_dependency_graph(&parsed.nodes);
+        let (graph, _) = build_dependency_graph(&parsed.nodes, &parsed.sequential_edges);
         let levels = compute_execution_levels(&graph);
 
         assert_eq!(levels.len(), 1, "all independent nodes should be at level 0");
@@ -910,7 +917,7 @@ mod tests {
         )
         .unwrap();
 
-        let (graph, index_map) = build_dependency_graph(&parsed.nodes);
+        let (graph, index_map) = build_dependency_graph(&parsed.nodes, &parsed.sequential_edges);
         let levels = compute_execution_levels(&graph);
 
         assert_eq!(levels.len(), 3, "linear chain should have 3 levels");
@@ -946,7 +953,7 @@ mod tests {
         )
         .unwrap();
 
-        let (graph, index_map) = build_dependency_graph(&parsed.nodes);
+        let (graph, index_map) = build_dependency_graph(&parsed.nodes, &parsed.sequential_edges);
         let levels = compute_execution_levels(&graph);
 
         let source_level = levels
@@ -1040,7 +1047,7 @@ mod tests {
         )
         .unwrap();
 
-        let (graph, index_map) = build_dependency_graph(&parsed.nodes);
+        let (graph, index_map) = build_dependency_graph(&parsed.nodes, &parsed.sequential_edges);
         let levels = compute_execution_levels(&graph);
 
         let config_level = levels.iter().position(|l| l.contains(&index_map["config"])).unwrap();

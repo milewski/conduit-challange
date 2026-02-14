@@ -160,6 +160,7 @@ pub struct ParsedWorkflow {
     pub inputs: BTreeMap<Identifier, Option<Value>>,
     pub event_handlers: BTreeMap<Identifier, BTreeMap<String, Vec<EventCallback>>>,
     pub event_callback_nodes: HashSet<Identifier>,
+    pub sequential_edges: Vec<(Identifier, Identifier)>,
 }
 
 #[derive(Debug, Default)]
@@ -168,6 +169,7 @@ struct Visitor {
     inputs: BTreeMap<Identifier, Option<Value>>,
     event_handlers: BTreeMap<Identifier, BTreeMap<String, Vec<EventCallback>>>,
     event_callback_nodes: HashSet<Identifier>,
+    sequential_edges: Vec<(Identifier, Identifier)>,
     external_inputs: HashMap<Identifier, SharedValue>,
     scope: HashMap<Identifier, Value>,
     aliases: HashMap<Identifier, Identifier>,
@@ -182,6 +184,30 @@ fn expression_parser() -> PrattParser<Rule> {
 }
 
 impl Visitor {
+    fn visit_sequence_group(&mut self, sequence_group: Pair<Rule>) -> Result<(), ParserError> {
+        assert_eq!(sequence_group.as_rule(), Rule::sequence_group);
+
+        let mut sequence_node_identifiers = Vec::new();
+
+        for sequence_item in sequence_group.into_inner() {
+            match sequence_item.as_rule() {
+                Rule::node | Rule::anonymous_node => {
+                    let (node, _) = self.visit_node(sequence_item)?;
+                    sequence_node_identifiers.push(node.identifier.clone());
+                }
+                _ => unreachable!("Unexpected rule in sequence group: {:?}", sequence_item.as_rule()),
+            }
+        }
+
+        for sequence_pair in sequence_node_identifiers.windows(2) {
+            let from_identifier = sequence_pair[0].clone();
+            let to_identifier = sequence_pair[1].clone();
+            self.sequential_edges.push((from_identifier, to_identifier));
+        }
+
+        Ok(())
+    }
+
     fn ensure_callback_node(&mut self, callback_name: &str) -> Result<Identifier, ParserError> {
         if let Some(existing_alias) = self.aliases.get(callback_name) {
             return Ok(existing_alias.clone());
@@ -462,6 +488,7 @@ impl Visitor {
                     Rule::node | Rule::anonymous_node => {
                         self.visit_node(child)?;
                     }
+                    Rule::sequence_group => self.visit_sequence_group(child)?,
                     _ => unreachable!("Unexpected rule in loop body: {:?}", child.as_rule()),
                 }
             }
@@ -1152,6 +1179,9 @@ impl<'a> NodeParser<'a> {
                     Rule::node | Rule::anonymous_node => {
                         self.visitor.visit_node(pair)?;
                     }
+                    Rule::sequence_group => {
+                        self.visitor.visit_sequence_group(pair)?;
+                    }
                     Rule::pipeline_result => {
                         self.visitor.visit_pipeline_result(pair)?;
                     }
@@ -1174,6 +1204,7 @@ impl<'a> NodeParser<'a> {
             inputs: self.visitor.inputs,
             event_handlers: self.visitor.event_handlers,
             event_callback_nodes: self.visitor.event_callback_nodes,
+            sequential_edges: self.visitor.sequential_edges,
         })
     }
 }
@@ -1468,6 +1499,28 @@ mod tests {
         };
         assert_eq!(explicit_identifier, EVENT_PAYLOAD_IDENTIFIER);
         assert_eq!(explicit_property, "value");
+    }
+
+    #[test]
+    fn test_sequence_group_creates_sequential_edges() {
+        let workflow = NodeParser::parse(
+            r#"
+            (
+                first task {}
+                second task {}
+                third task {}
+            )
+            "#,
+        )
+        .expect("sequence group should parse");
+
+        assert_eq!(
+            workflow.sequential_edges,
+            vec![
+                ("first".to_string(), "second".to_string()),
+                ("second".to_string(), "third".to_string()),
+            ]
+        );
     }
 }
 

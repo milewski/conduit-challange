@@ -163,3 +163,32 @@ fn test_event_callback_uses_explicit_payload_alias() {
 
     assert_eq!(output, 2);
 }
+
+#[test]
+fn test_parenthesized_nodes_run_sequentially() {
+    let output: u32 = pipeline! {r#"
+        store _ {
+            counter <- 0
+        }
+
+        (
+            first task {
+                count <- 1
+                on done -> {
+                    store::counter <- 1
+                }
+            }
+
+            second task {
+                count <- 1
+                on done -> {
+                    store::counter <- (store::counter * 10)
+                }
+            }
+        )
+
+        <- store::counter
+    "#};
+
+    assert_eq!(output, 10);
+}
