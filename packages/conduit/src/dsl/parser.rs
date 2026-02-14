@@ -412,7 +412,7 @@ impl Visitor {
                 Value::Relation {
                     identifier: alias_storage_identifier.clone(),
                     direction: Direction::Input,
-                    property: "value".to_string(),
+                    property: "output".to_string(),
                 },
             )
         } else {
@@ -424,11 +424,11 @@ impl Visitor {
         if let Some(alias_storage_identifier) = alias_storage_identifier {
             let alias_capture_assignment = EventCallback::Assignment(CallbackAssignment {
                 identifier: alias_storage_identifier,
-                property: "value".to_string(),
+                property: "output".to_string(),
                 value: Value::Relation {
                     identifier: EVENT_PAYLOAD_IDENTIFIER.to_string(),
                     direction: Direction::Input,
-                    property: "value".to_string(),
+                    property: "output".to_string(),
                 },
             });
 
@@ -1523,10 +1523,10 @@ mod tests {
             ..
         } = &implicit_assignment.value
         else {
-            panic!("expected relation for implicit payload value")
+            panic!("expected relation for implicit payload output")
         };
         assert_eq!(implicit_identifier, EVENT_PAYLOAD_IDENTIFIER);
-        assert_eq!(implicit_property, "value");
+        assert_eq!(implicit_property, "output");
 
         let explicit_alias_workflow = NodeParser::parse(
             r#"
@@ -1561,7 +1561,7 @@ mod tests {
             panic!("expected relation for explicit payload value")
         };
         assert_eq!(explicit_identifier, EVENT_PAYLOAD_IDENTIFIER);
-        assert_eq!(explicit_property, "value");
+        assert_eq!(explicit_property, "output");
     }
 
     #[test]

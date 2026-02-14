@@ -117,7 +117,7 @@ impl<'a> CallbackExecutionContext<'a> {
             self.outputs
                 .entry(EVENT_PAYLOAD_IDENTIFIER.to_string())
                 .or_default()
-                .insert("value".to_string(), payload_value);
+                .insert("output".to_string(), payload_value);
 
             match event_callback {
                 EventCallback::PipedValue(callback_value) => {
