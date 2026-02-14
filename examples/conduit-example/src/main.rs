@@ -23,7 +23,10 @@ fn main() {
             <- read_file <- "./examples/conduit-example/cover.png"
             width <- width
             height <- height
-            -> write_file {
+            on started -> write_file {
+                destination <- "./examples/conduit-example/cover.started.png"
+            }
+            on resized -> write_file {
                 destination <- "./examples/conduit-example/cover.example.png"
             }
         }

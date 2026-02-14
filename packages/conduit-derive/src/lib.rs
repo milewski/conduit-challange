@@ -21,6 +21,44 @@ fn extract_ok_type(ty: &syn::Type) -> Option<&syn::Type> {
     None
 }
 
+fn extract_emitter_event_type(ty: &syn::Type) -> Option<syn::Type> {
+    let syn::Type::Path(type_path) = ty else {
+        return None;
+    };
+
+    let last_segment = type_path.path.segments.last()?;
+    if last_segment.ident != "Emitter" {
+        return None;
+    }
+
+    let syn::PathArguments::AngleBracketed(generic_arguments) = &last_segment.arguments else {
+        return None;
+    };
+
+    let syn::GenericArgument::Type(event_type) = generic_arguments.args.first()? else {
+        return None;
+    };
+
+    Some(event_type.clone())
+}
+
+fn to_snake_case(name: &str) -> String {
+    let mut snake_case = String::new();
+    for (index, character) in name.chars().enumerate() {
+        if character.is_uppercase() {
+            if index != 0 {
+                snake_case.push('_');
+            }
+            for lowercase_character in character.to_lowercase() {
+                snake_case.push(lowercase_character);
+            }
+        } else {
+            snake_case.push(character);
+        }
+    }
+    snake_case
+}
+
 #[proc_macro_attribute]
 pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input_fn = parse_macro_input!(item as ItemFn);
@@ -28,11 +66,32 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let struct_name = fn_name; // Keep same name (lowercase)
     let struct_name_input = syn::Ident::new(&format!("{}Input", fn_name), fn_name.span());
 
+    let mut emitter_argument_identifier: Option<syn::Ident> = None;
+    let mut emitter_event_type: Option<syn::Type> = None;
+
+    for arg in &input_fn.sig.inputs {
+        if let syn::FnArg::Typed(pat_type) = arg {
+            if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                if let Some(event_type) = extract_emitter_event_type(&pat_type.ty) {
+                    emitter_argument_identifier = Some(pat_ident.ident.clone());
+                    emitter_event_type = Some(event_type);
+                    break;
+                }
+            }
+        }
+    }
+
     // Capture input aliases before filtering attributes
     let mut input_mapping = std::collections::HashMap::new();
     for arg in &input_fn.sig.inputs {
         if let syn::FnArg::Typed(pat_type) = arg {
             if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                if emitter_argument_identifier
+                    .as_ref()
+                    .is_some_and(|identifier| identifier == &pat_ident.ident)
+                {
+                    continue;
+                }
                 for attr in &pat_type.attrs {
                     if attr.path().is_ident("input") {
                         let name = pat_ident.ident.to_string();
@@ -51,7 +110,29 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
-    let inputs: Vec<_> = input_fn
+    let node_input_fields: Vec<_> = input_fn
+        .sig
+        .inputs
+        .iter()
+        .filter_map(|arg| {
+            if let syn::FnArg::Typed(pat_type) = arg {
+                if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                    if emitter_argument_identifier
+                        .as_ref()
+                        .is_some_and(|identifier| identifier == &pat_ident.ident)
+                    {
+                        return None;
+                    }
+                    let ident = &pat_ident.ident;
+                    let ty = &pat_type.ty;
+                    return Some(quote! { #ident: #ty });
+                }
+            }
+            panic!("Unsupported argument type in node function");
+        })
+        .collect();
+
+    let function_inputs: Vec<_> = input_fn
         .sig
         .inputs
         .iter()
@@ -67,9 +148,15 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect();
 
-    let input_fields_extract = input_fn.sig.inputs.iter().map(|arg| {
+    let input_fields_extract = input_fn.sig.inputs.iter().filter_map(|arg| {
         if let syn::FnArg::Typed(pat_type) = arg {
             if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                if emitter_argument_identifier
+                    .as_ref()
+                    .is_some_and(|identifier| identifier == &pat_ident.ident)
+                {
+                    return None;
+                }
                 let ident = &pat_ident.ident;
                 let ident_str = ident.to_string();
                 let ty = &pat_type.ty;
@@ -77,35 +164,41 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let is_input = input_mapping.get(&ident_str).is_some();
 
                 if is_input {
-                    return quote! {
+                    return Some(quote! {
                         #ident: payload
                             .get("input")
                             .or_else(|| payload.get(#ident_str))
                             .ok_or(conduit::node::NodeError::MissingInput("input or explicit field".to_string()))
                             .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
-                    };
+                    });
                 } else {
-                    return quote! {
+                    return Some(quote! {
                         #ident: payload
                             .get(#ident_str)
                             .ok_or(conduit::node::NodeError::MissingInput(#ident_str.to_string()))
                             .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
-                    };
+                    });
                 }
             }
         }
         panic!("Unsupported argument type");
     });
 
-    let input_field_names = input_fn.sig.inputs.iter().map(|arg| {
+    let input_field_names = input_fn.sig.inputs.iter().filter_map(|arg| {
         if let syn::FnArg::Typed(pat_type) = arg {
             if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
+                if emitter_argument_identifier
+                    .as_ref()
+                    .is_some_and(|identifier| identifier == &pat_ident.ident)
+                {
+                    return None;
+                }
                 let ident_str = pat_ident.ident.to_string();
                 let is_input = input_mapping.get(&ident_str).is_some();
                 if is_input {
-                    return quote! { #ident_str, "input" };
+                    return Some(quote! { #ident_str, "input" });
                 } else {
-                    return quote! { #ident_str };
+                    return Some(quote! { #ident_str });
                 }
             }
         }
@@ -116,6 +209,12 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
         if let syn::FnArg::Typed(pat_type) = arg {
             if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
                 let ident = &pat_ident.ident;
+                if emitter_argument_identifier
+                    .as_ref()
+                    .is_some_and(|identifier| identifier == ident)
+                {
+                    return quote! { emitter };
+                }
                 return quote! { input.#ident };
             }
         }
@@ -123,6 +222,7 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
     });
 
     let body = &input_fn.block;
+    let node_event_type = emitter_event_type.unwrap_or_else(|| syn::parse_quote! { () });
 
     let (output_ty, is_result) = match &input_fn.sig.output {
         syn::ReturnType::Default => (quote! { () }, false),
@@ -154,7 +254,7 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
         #[allow(non_camel_case_types)]
         struct #struct_name_input {
-            #(#inputs),*
+            #(#node_input_fields),*
         }
 
         impl conduit::traits::NodeInput for #struct_name_input {
@@ -172,14 +272,14 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
         impl conduit::traits::ExecutableNode for #struct_name {
             type Input = #struct_name_input;
             type Output = #output_ty;
-            type Event = ();
+            type Event = #node_event_type;
 
             async fn run(
                 &self,
                 input: Self::Input,
-                _emitter: conduit::traits::Emitter<Self::Event>,
+                emitter: conduit::traits::Emitter<Self::Event>,
             ) -> Result<Self::Output, conduit::node::NodeError> {
-                let func = |#(#inputs),*| async move #body;
+                let func = |#(#function_inputs),*| async move #body;
                 #run_impl
             }
         }
@@ -333,6 +433,77 @@ pub fn derive_node_output(input: TokenStream) -> TokenStream {
 
             fn field_names() -> Vec<&'static str> {
                 vec![#(#field_names),*]
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+#[proc_macro_derive(NodeEvent)]
+pub fn derive_node_event(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+
+    let variants = match &input.data {
+        Data::Enum(data) => &data.variants,
+        _ => panic!("NodeEvent derive only works on enums"),
+    };
+
+    let match_arms = variants.iter().map(|variant| {
+        let variant_name = &variant.ident;
+        let event_name = to_snake_case(&variant_name.to_string());
+
+        match &variant.fields {
+            Fields::Unit => quote! {
+                Self::#variant_name => conduit::traits::EventData::without_value(#event_name)
+            },
+            Fields::Named(fields) => {
+                let field_names: Vec<_> = fields
+                    .named
+                    .iter()
+                    .map(|field| field.ident.as_ref().unwrap())
+                    .collect();
+
+                if field_names.len() == 1 {
+                    let value_field = field_names[0];
+                    quote! {
+                        Self::#variant_name { #value_field } => conduit::traits::EventData::with_value(#event_name, #value_field)
+                    }
+                } else {
+                    quote! {
+                        Self::#variant_name { #(#field_names),* } => conduit::traits::EventData::with_value(#event_name, (#(#field_names),*))
+                    }
+                }
+            }
+            Fields::Unnamed(fields) => {
+                let field_names: Vec<syn::Ident> = fields
+                    .unnamed
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| syn::Ident::new(&format!("value_{}", index), variant.ident.span()))
+                    .collect();
+
+                if field_names.len() == 1 {
+                    let value_field = &field_names[0];
+                    quote! {
+                        Self::#variant_name(#value_field) => conduit::traits::EventData::with_value(#event_name, #value_field)
+                    }
+                } else {
+                    quote! {
+                        Self::#variant_name(#(#field_names),*) => conduit::traits::EventData::with_value(#event_name, (#(#field_names),*))
+                    }
+                }
+            }
+        }
+    });
+
+    let expanded = quote! {
+        impl conduit::traits::NodeEvent for #name {
+            fn into_parts(self) -> conduit::traits::EventData {
+                match self {
+                    #(#match_arms),*
+                }
             }
         }
     };
