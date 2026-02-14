@@ -294,7 +294,15 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 &self,
                 payload: conduit::registry::Payload,
             ) -> Result<conduit::traits::NodeExecutionResult, conduit::node::NodeError> {
-                let emitter = conduit::traits::Emitter::<<Self as conduit::traits::ExecutableNode>::Event>::default();
+                self.run_with_payload_with_event_sender(payload, None).await
+            }
+
+            async fn run_with_payload_with_event_sender(
+                &self,
+                payload: conduit::registry::Payload,
+                event_sender: Option<tokio::sync::mpsc::UnboundedSender<conduit::traits::EventData>>,
+            ) -> Result<conduit::traits::NodeExecutionResult, conduit::node::NodeError> {
+                let emitter = conduit::traits::Emitter::<<Self as conduit::traits::ExecutableNode>::Event>::with_event_sender(event_sender);
                 let input = <<Self as conduit::traits::ExecutableNode>::Input as conduit::traits::NodeInput>::from_payload(&payload)?;
                 let output = <Self as conduit::traits::ExecutableNode>::run(self, input, emitter.clone()).await?;
                 Ok(conduit::traits::NodeExecutionResult {
@@ -533,7 +541,15 @@ pub fn derive_node(input: TokenStream) -> TokenStream {
                 &self,
                 payload: conduit::registry::Payload,
             ) -> Result<conduit::traits::NodeExecutionResult, conduit::node::NodeError> {
-                let emitter = conduit::traits::Emitter::<<Self as conduit::traits::ExecutableNode>::Event>::default();
+                self.run_with_payload_with_event_sender(payload, None).await
+            }
+
+            async fn run_with_payload_with_event_sender(
+                &self,
+                payload: conduit::registry::Payload,
+                event_sender: Option<tokio::sync::mpsc::UnboundedSender<conduit::traits::EventData>>,
+            ) -> Result<conduit::traits::NodeExecutionResult, conduit::node::NodeError> {
+                let emitter = conduit::traits::Emitter::<<Self as conduit::traits::ExecutableNode>::Event>::with_event_sender(event_sender);
                 let input = <<Self as conduit::traits::ExecutableNode>::Input as conduit::traits::NodeInput>::from_payload(&payload)?;
                 let output = <Self as conduit::traits::ExecutableNode>::run(self, input, emitter.clone()).await?;
                 Ok(conduit::traits::NodeExecutionResult {

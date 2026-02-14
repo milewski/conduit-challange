@@ -40,9 +40,6 @@ impl ExecutableNode for Resizer {
             .map_err(|error| NodeError::Custom(error.to_string()))?;
 
         emitter.emit(Event::Started { value: buffer.clone() }).await;
-        println!("sleeeeping...");
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
         emitter.emit(Event::Resized { value: buffer.clone() }).await;
 
         Ok(buffer)

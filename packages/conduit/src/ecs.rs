@@ -11,6 +11,7 @@ use petgraph::dot::{Config, Dot};
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 pub struct Engine {
     registry: Arc<NodeRegistry>,
@@ -254,28 +255,16 @@ impl Engine {
                 }
 
                 let payload = resolve_inputs(instruct, &outputs, &nodes, &input_names)?;
-                let instance = self
-                    .registry
-                    .create(&instruct.module, Default::default())
-                    .ok_or_else(|| crate::node::NodeError::ModuleNotFound(instruct.module.clone()))?;
-
-                let execution_result = instance.run_with_payload(payload).await?;
-                let map: HashMap<String, SharedValue> = execution_result
-                    .outputs
-                    .into_iter()
-                    .map(|(key, value)| (key.to_string(), value))
-                    .collect();
-
-                outputs.insert(id.clone(), map);
-
-                run_event_callbacks(
+                execute_node_with_streaming_events(
                     &self.registry,
                     &nodes,
                     &input_names,
                     &mut outputs,
                     &event_handlers,
                     event_handlers.get(id),
-                    execution_result.events,
+                    id,
+                    instruct,
+                    payload,
                 )
                 .await?;
             }
@@ -299,6 +288,100 @@ impl Engine {
             T::from_shared_value(&unit).map_err(|_| crate::node::NodeError::NoPipelineResultDefined)
         }
     }
+}
+
+async fn execute_node_with_streaming_events(
+    registry: &Arc<NodeRegistry>,
+    nodes: &BTreeMap<Identifier, NodeInstruct>,
+    input_names: &std::collections::HashSet<String>,
+    outputs: &mut HashMap<Identifier, HashMap<String, SharedValue>>,
+    all_event_handlers: &BTreeMap<Identifier, BTreeMap<String, Vec<EventCallback>>>,
+    event_handlers: Option<&BTreeMap<String, Vec<EventCallback>>>,
+    node_identifier: &Identifier,
+    node_instruct: &NodeInstruct,
+    payload: Payload,
+) -> Result<(), crate::node::NodeError> {
+    let node_instance = registry
+        .create(&node_instruct.module, Default::default())
+        .ok_or_else(|| crate::node::NodeError::ModuleNotFound(node_instruct.module.clone()))?;
+
+    let (event_sender, mut event_receiver) = mpsc::unbounded_channel();
+    let mut node_execution_future =
+        Box::pin(node_instance.run_with_payload_with_event_sender(payload, Some(event_sender)));
+    let mut streamed_event_count = 0usize;
+    let mut is_event_stream_open = true;
+
+    let execution_result = loop {
+        if is_event_stream_open {
+            tokio::select! {
+                maybe_emitted_event = event_receiver.recv() => {
+                    if let Some(emitted_event) = maybe_emitted_event {
+                        streamed_event_count += 1;
+                        Box::pin(run_event_callbacks(
+                            registry,
+                            nodes,
+                            input_names,
+                            outputs,
+                            all_event_handlers,
+                            event_handlers,
+                            vec![emitted_event],
+                        ))
+                        .await?;
+                    } else {
+                        is_event_stream_open = false;
+                    }
+                }
+                execution_result = &mut node_execution_future => {
+                    break execution_result?;
+                }
+            }
+        } else {
+            break node_execution_future.await?;
+        }
+    };
+
+    while let Ok(emitted_event) = event_receiver.try_recv() {
+        streamed_event_count += 1;
+        Box::pin(run_event_callbacks(
+            registry,
+            nodes,
+            input_names,
+            outputs,
+            all_event_handlers,
+            event_handlers,
+            vec![emitted_event],
+        ))
+        .await?;
+    }
+
+    let mut emitted_events = execution_result.events;
+    let remaining_emitted_events = if streamed_event_count < emitted_events.len() {
+        emitted_events.split_off(streamed_event_count)
+    } else {
+        Vec::new()
+    };
+
+    let node_outputs: HashMap<String, SharedValue> = execution_result
+        .outputs
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value))
+        .collect();
+    outputs.insert(node_identifier.clone(), node_outputs);
+
+    if !remaining_emitted_events.is_empty() {
+        Box::pin(run_event_callbacks(
+            registry,
+            nodes,
+            input_names,
+            outputs,
+            all_event_handlers,
+            event_handlers,
+            remaining_emitted_events,
+        ))
+        .await?;
+    }
+
+    Ok(())
 }
 
 async fn run_event_callbacks(
@@ -335,27 +418,18 @@ async fn run_event_callbacks(
                                 callback_payload.insert(property, value);
                             }
 
-                            let callback_instance = registry
-                                .create(&callback_node.module, Default::default())
-                                .ok_or_else(|| crate::node::NodeError::ModuleNotFound(callback_node.module.clone()))?;
-                            let callback_result = callback_instance.run_with_payload(callback_payload).await?;
-                            let callback_outputs: HashMap<String, SharedValue> = callback_result
-                                .outputs
-                                .into_iter()
-                                .map(|(key, value)| (key.to_string(), value))
-                                .collect();
-                            outputs.insert(identifier.clone(), callback_outputs);
-
-                            for emitted_event in callback_result.events {
-                                if let Some(callbacks) = all_event_handlers
-                                    .get(&identifier)
-                                    .and_then(|handlers| handlers.get(&emitted_event.name))
-                                {
-                                    for callback in callbacks {
-                                        queued_callbacks.push_back((callback.clone(), emitted_event.value.clone()));
-                                    }
-                                }
-                            }
+                            Box::pin(execute_node_with_streaming_events(
+                                registry,
+                                nodes,
+                                input_names,
+                                outputs,
+                                all_event_handlers,
+                                all_event_handlers.get(&identifier),
+                                &identifier,
+                                callback_node,
+                                callback_payload,
+                            ))
+                            .await?;
                         } else if let Some(value) = event_payload.clone() {
                             outputs.entry(identifier).or_default().insert(property, value);
                         }

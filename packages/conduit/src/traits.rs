@@ -5,6 +5,7 @@ use std::any::Any;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::Mutex;
+use tokio::sync::mpsc::UnboundedSender;
 
 // -- Conversion traits for Input/Output types --
 
@@ -177,6 +178,7 @@ where
     Event: NodeEvent,
 {
     events: Arc<Mutex<Vec<EventData>>>,
+    event_sender: Option<UnboundedSender<EventData>>,
     marker: PhantomData<Event>,
 }
 
@@ -187,6 +189,7 @@ where
     fn clone(&self) -> Self {
         Self {
             events: self.events.clone(),
+            event_sender: self.event_sender.clone(),
             marker: PhantomData,
         }
     }
@@ -199,6 +202,7 @@ where
     fn default() -> Self {
         Self {
             events: Arc::new(Mutex::new(Vec::new())),
+            event_sender: None,
             marker: PhantomData,
         }
     }
@@ -208,9 +212,23 @@ impl<Event> Emitter<Event>
 where
     Event: NodeEvent,
 {
+    pub fn with_event_sender(event_sender: Option<UnboundedSender<EventData>>) -> Self {
+        Self {
+            events: Arc::new(Mutex::new(Vec::new())),
+            event_sender,
+            marker: PhantomData,
+        }
+    }
+
     pub async fn emit(&self, event: Event) {
+        let event_data = event.into_parts();
+
         let mut events = self.events.lock().expect("event emitter mutex poisoned");
-        events.push(event.into_parts());
+        events.push(event_data.clone());
+
+        if let Some(event_sender) = &self.event_sender {
+            let _ = event_sender.send(event_data);
+        }
     }
 
     pub fn into_events(self) -> Vec<EventData> {
@@ -245,6 +263,15 @@ pub trait DynNode: Send + Sync {
     fn name(&self) -> &'static str;
 
     async fn run_with_payload(&self, payload: Payload) -> Result<NodeExecutionResult, NodeError>;
+
+    async fn run_with_payload_with_event_sender(
+        &self,
+        payload: Payload,
+        event_sender: Option<UnboundedSender<EventData>>,
+    ) -> Result<NodeExecutionResult, NodeError> {
+        let _ = event_sender;
+        self.run_with_payload(payload).await
+    }
 
     fn input_fields(&self) -> Vec<&'static str>;
     fn output_fields(&self) -> Vec<&'static str>;
