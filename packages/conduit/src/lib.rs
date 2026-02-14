@@ -3,13 +3,13 @@ use std::os::raw::c_char;
 use std::ptr;
 
 pub mod dsl;
-pub mod ecs;
+pub mod engine;
 pub mod node;
 pub mod registry;
 mod test;
 pub mod traits;
 
-pub use crate::ecs::Engine;
+pub use crate::engine::Engine;
 pub use crate::node::{FromSharedValue, SharedValue};
 pub use conduit_derive::node as functional_node;
 

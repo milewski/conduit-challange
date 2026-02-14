@@ -1,8 +1,8 @@
-use std::io::Write;
 use conduit::node::NodeError;
 use conduit::traits::Emitter;
 use conduit::try_pipeline;
 use conduit_derive::{NodeEvent, node};
+use std::io::Write;
 
 mod nodes;
 
