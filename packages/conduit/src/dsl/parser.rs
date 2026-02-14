@@ -1104,7 +1104,16 @@ impl Visitor {
                         if let Some(value) = self.scope.get(identifier_str) {
                             match value {
                                 Value::Numeric { value, .. } => Ok(Expression::Number(value.clone())),
-                                _ => unreachable!("Only numeric values are supported in expressions"),
+                                Value::Relation {
+                                    identifier, property, ..
+                                } => Ok(Expression::Reference {
+                                    identifier: identifier.clone(),
+                                    property: property.clone(),
+                                }),
+                                _ => Ok(Expression::Reference {
+                                    identifier: identifier_str.to_string(),
+                                    property: "output".to_string(),
+                                }),
                             }
                         } else {
                             let identifier = self

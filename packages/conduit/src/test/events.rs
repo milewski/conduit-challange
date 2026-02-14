@@ -339,3 +339,23 @@ fn test_callback_block_data_node_is_resolved_before_downstream_dependency() {
 
     assert_eq!(output, (1, 1));
 }
+
+#[test]
+fn test_event_payload_alias_can_be_interpolated_in_string() {
+    let output: String = pipeline! {r#"
+        store _ {
+            message <- ""
+        }
+
+        task {
+            count <- 3
+            on done width {
+                store::message <- "Awesome the width was: { width }, how about the height?"
+            }
+        }
+
+        <- store::message
+    "#};
+
+    assert_eq!(output, "Awesome the width was: 3, how about the height?");
+}

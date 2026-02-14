@@ -44,7 +44,7 @@ fn main() {
             <- "Enter the desired width?"
             on answer width {
                 prompt {
-                    <- "Enter the desired height?"
+                    <- "Awesome the width was: { width }, how about the height?"
                     on answer height {
                         config _ {
                             width <- width
@@ -67,12 +67,12 @@ fn main() {
 
     let graph = graphviz!(pipeline);
 
-    println!("{}", graph);
+    // println!("{}", graph);
 
-    // let result: Result<Vec<u8>, _> = try_pipeline!(pipeline);
-    //
-    // match result {
-    //     Ok(data) => println!("{} bytes", data.len()),
-    //     Err(e) => println!("Pipeline error: {}", e),
-    // }
+    let result: Result<Vec<u8>, _> = try_pipeline!(pipeline);
+
+    match result {
+        Ok(data) => println!("{} bytes", data.len()),
+        Err(e) => println!("Pipeline error: {}", e),
+    }
 }
