@@ -174,11 +174,18 @@ impl<'a> CallbackExecutionContext<'a> {
             };
 
             if callback_node.module == "_" || !self.registry.has(&callback_node.module) {
-                if let Some(payload_value) = event_payload {
+                let mut resolved_callback_outputs =
+                    super::resolve_inputs(&callback_node, self.outputs, self.nodes, self.input_names)?;
+
+                if should_pipe_payload && let Some(payload_value) = event_payload {
+                    resolved_callback_outputs.insert(property, payload_value);
+                }
+
+                if !resolved_callback_outputs.is_empty() {
                     self.outputs
                         .entry(identifier)
                         .or_default()
-                        .insert(property, payload_value);
+                        .extend(resolved_callback_outputs);
                 }
                 return Ok(());
             }

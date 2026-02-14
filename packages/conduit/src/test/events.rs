@@ -314,3 +314,28 @@ fn test_callback_block_executes_input_dependencies_before_node() {
 
     assert_eq!(output, 7);
 }
+
+#[test]
+fn test_callback_block_data_node_is_resolved_before_downstream_dependency() {
+    let output: (u32, u32) = pipeline! {r#"
+        task {
+            count <- 1
+            on done width {
+                task {
+                    count <- 1
+                    on done height {
+                        config _ {
+                            width <- width
+                            height <- height
+                        }
+                    }
+                }
+            }
+        }
+
+        <- config::width
+        <- config::height
+    "#};
+
+    assert_eq!(output, (1, 1));
+}

@@ -1,5 +1,5 @@
 use crate::node::NodeError;
-use crate::{Engine, input, pipeline, try_pipeline};
+use crate::{Engine, graphviz, input, pipeline, try_graphviz, try_pipeline};
 
 #[test]
 fn test_engine_generates_dot_graph_for_pipeline() {
@@ -16,6 +16,21 @@ fn test_engine_generates_dot_graph_for_pipeline() {
     assert!(dot_graph.contains("digraph {"));
     assert!(dot_graph.contains("source"));
     assert!(dot_graph.contains("sink"));
+}
+
+#[test]
+fn test_graphviz_macros_generate_dot_graph() {
+    let workflow = r#"
+        source _ { output <- 1 }
+        sink _ { input <- source }
+    "#;
+    let dot_graph = graphviz! { workflow };
+    let dot_graph_result = try_graphviz! { workflow };
+
+    assert!(dot_graph.contains("digraph {"));
+    assert!(dot_graph.contains("source"));
+    assert!(dot_graph.contains("sink"));
+    assert!(dot_graph_result.is_ok());
 }
 
 #[test]

@@ -89,6 +89,20 @@ mod tests {
         };
         assert_eq!(output, "example");
     }
+
+    #[test]
+    fn test_graphviz_macro_simple() {
+        let dot_graph = graphviz! {
+            r#"
+            source _ { output <- 1 }
+            sink _ { input <- source }
+        "#
+        };
+
+        assert!(dot_graph.contains("digraph {"));
+        assert!(dot_graph.contains("source"));
+        assert!(dot_graph.contains("sink"));
+    }
 }
 
 /// Macro to create a dynamic input object for the pipeline.
@@ -148,4 +162,26 @@ macro_rules! try_pipeline {
     ($pipeline:expr) => {
         $crate::try_pipeline!((), $pipeline)
     };
+}
+
+/// Public API macro to generate Graphviz DOT output for a workflow.
+///
+/// Usage:
+/// ```rust,ignore
+/// use conduit::graphviz;
+///
+/// let dot_graph: String = graphviz! { r#"source _ { output <- 1 }"# };
+/// ```
+#[macro_export]
+macro_rules! try_graphviz {
+    ($workflow:expr) => {{
+        let engine = $crate::Engine::new();
+        engine.generate_dot_graph($workflow)
+    }};
+}
+
+/// Macro to generate Graphviz DOT output and unwrap the result.
+#[macro_export]
+macro_rules! graphviz {
+    ($workflow:expr) => {{ $crate::try_graphviz!($workflow).unwrap() }};
 }

@@ -237,6 +237,10 @@ impl Engine {
                 continue;
             }
 
+            if event_callback_nodes.contains(id) {
+                continue;
+            }
+
             if instruct.module == "_" || !self.registry.has(&instruct.module) {
                 // If it's an input, we already handled it
                 if instruct.module == "__input__" {

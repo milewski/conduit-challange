@@ -1,6 +1,6 @@
 use conduit::node::NodeError;
 use conduit::traits::Emitter;
-use conduit::try_pipeline;
+use conduit::{graphviz, try_graphviz, try_pipeline};
 use conduit_derive::{NodeEvent, node};
 use std::io::Write;
 
@@ -46,26 +46,33 @@ fn main() {
                 prompt {
                     <- "Enter the desired height?"
                     on answer height {
-                        resizer resizer {
-                            <- read_file <- "./examples/conduit-example/cover.png"
+                        config _ {
                             width <- width
                             height <- height
-                            -> write_file {
-                                destination <- "./examples/conduit-example/cover.example.png"
-                            }
                         }
                     }
                 }
             }
         }
 
-        <- resizer
+        <-  resizer {
+            <- read_file <- "./examples/conduit-example/cover.png"
+            width <- config::width
+            height <- config::height
+            -> write_file {
+                destination <- "./examples/conduit-example/cover.example.png"
+            }
+        }
     "#;
 
-    let result: Result<Vec<u8>, _> = try_pipeline!(pipeline);
+    let graph = graphviz!(pipeline);
 
-    match result {
-        Ok(data) => println!("{} bytes", data.len()),
-        Err(e) => println!("Pipeline error: {}", e),
-    }
+    println!("{}", graph);
+
+    // let result: Result<Vec<u8>, _> = try_pipeline!(pipeline);
+    //
+    // match result {
+    //     Ok(data) => println!("{} bytes", data.len()),
+    //     Err(e) => println!("Pipeline error: {}", e),
+    // }
 }
