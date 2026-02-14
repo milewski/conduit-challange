@@ -125,29 +125,7 @@ macro_rules! pipeline {
     ($pipeline:expr) => {
         $crate::pipeline!((), $pipeline)
     };
-    ($input:expr, $pipeline:expr) => {{
-        let mut engine = $crate::Engine::new();
-        engine.run_pipeline_blocking($pipeline, $input).unwrap()
-    }};
-}
-
-/// Macro to run a pipeline inline and return the Result.
-///
-/// Usage:
-/// ```rust,ignore
-/// use conduit::{pipeline_result, input};
-///
-/// let result: Result<String, _> = pipeline_result! { r#"<- "hello""# };
-/// ```
-#[macro_export]
-macro_rules! pipeline_result {
-    ($pipeline:expr) => {
-        $crate::pipeline_result!((), $pipeline)
-    };
-    ($input:expr, $pipeline:expr) => {{
-        let mut engine = $crate::Engine::new();
-        engine.run_pipeline_blocking($pipeline, $input)
-    }};
+    ($input:expr, $pipeline:expr) => {{ $crate::try_pipeline!($input, $pipeline).unwrap() }};
 }
 
 /// Public API macro to run a pipeline inline and return a Result (preferred public name).

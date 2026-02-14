@@ -1,6 +1,6 @@
 use crate::dsl::parser::{
-    Direction, Expression, Identifier, NodeInstruct, NodeParser, Operation, PIPELINE_RESULT_ID, ParsedWorkflow,
-    StringPart, Value,
+    CallbackAssignment, Direction, EventCallback, Expression, Identifier, NodeInstruct, NodeParser, Operation,
+    PIPELINE_RESULT_ID, ParsedWorkflow, StringPart, Value,
 };
 use crate::node::FromSharedValue;
 use crate::node::SharedValue;
@@ -9,7 +9,7 @@ use crate::traits::NodeOutput;
 use petgraph::Direction as GraphDirection;
 use petgraph::dot::{Config, Dot};
 use petgraph::graph::{DiGraph, NodeIndex};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 pub struct Engine {
@@ -39,19 +39,50 @@ impl Engine {
     pub fn validate_modules(&self, nodes: &BTreeMap<Identifier, NodeInstruct>) -> Result<(), crate::node::NodeError> {
         for (_, instruct) in nodes {
             let module_name = &instruct.module;
-            if module_name != "_" && module_name != "__input__" && !self.registry.has(module_name) {
+            if module_name == "_" || module_name == "__input__" {
+                continue;
+            }
+
+            if !self.registry.has(module_name) {
                 return Err(crate::node::NodeError::ModuleValidationError(format!(
                     "Unknown module '{}' in node '{}'",
                     module_name, instruct.identifier
                 )));
+            }
+
+            let module_instance = self
+                .registry
+                .create(module_name, Default::default())
+                .ok_or_else(|| crate::node::NodeError::ModuleNotFound(module_name.clone()))?;
+            let input_fields: HashSet<String> = module_instance
+                .input_fields()
+                .into_iter()
+                .map(|field_name| field_name.to_string())
+                .collect();
+
+            for (property_name, value) in &instruct.inputs {
+                if !is_input_direction(value) {
+                    continue;
+                }
+
+                if !input_fields.contains(property_name) {
+                    return Err(crate::node::NodeError::ModuleValidationError(format!(
+                        "Unknown input '{}' for module '{}' in node '{}'",
+                        property_name, module_name, instruct.identifier
+                    )));
+                }
             }
         }
         Ok(())
     }
 
     pub fn generate_dot_graph(&self, workflow: &str) -> Result<String, crate::node::NodeError> {
-        let ParsedWorkflow { nodes, inputs } =
-            NodeParser::parse(workflow).map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?;
+        let ParsedWorkflow {
+            nodes,
+            inputs,
+            event_handlers: _,
+            event_callback_nodes: _,
+        } = NodeParser::parse(workflow).map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?;
 
         let (graph, _) = build_dependency_graph(&nodes);
 
@@ -128,7 +159,12 @@ impl Engine {
             .map(|(key, value)| (key.to_string(), value))
             .collect();
 
-        let ParsedWorkflow { mut nodes, inputs } = NodeParser::new(workflow)
+        let ParsedWorkflow {
+            mut nodes,
+            inputs,
+            event_handlers,
+            event_callback_nodes,
+        } = NodeParser::new(workflow)
             .map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?
             .with_inputs(runtime_inputs.clone())
             .evaluate()
@@ -205,50 +241,43 @@ impl Engine {
         }
 
         for level_indices in levels {
-            let mut handles = Vec::new();
-            let mut handle_ids = Vec::new();
-
             for idx in level_indices {
                 let id = &graph[idx];
                 let instruct = &nodes[id];
 
-                // Skip inputs (already handled)
-                if instruct.module == "__input__" {
+                if instruct.module == "__input__" || event_callback_nodes.contains(id) {
                     continue;
                 }
 
-                // Skip data-only nodes (marked with _ or others pre-resolved) — already resolved above
                 if instruct.module == "_" || !self.registry.has(&instruct.module) {
                     continue;
                 }
 
                 let payload = resolve_inputs(instruct, &outputs, &nodes, &input_names)?;
-                let module_name = instruct.module.clone();
-                let registry = self.registry.clone();
+                let instance = self
+                    .registry
+                    .create(&instruct.module, Default::default())
+                    .ok_or_else(|| crate::node::NodeError::ModuleNotFound(instruct.module.clone()))?;
 
-                handle_ids.push(id.clone());
-                handles.push(tokio::spawn(async move {
-                    let instance = registry
-                        .create(&module_name, Default::default())
-                        .ok_or_else(|| crate::node::NodeError::ModuleNotFound(module_name.clone()))?;
-
-                    instance.run_with_payload(payload).await
-                }));
-            }
-
-            for (handle, id) in handles.into_iter().zip(handle_ids) {
-                let node_result = handle
-                    .await
-                    .map_err(|error| crate::node::NodeError::TaskExecutionError(error.to_string()))?;
-
-                let node_outputs = node_result?;
-
-                let map: HashMap<String, SharedValue> = node_outputs
+                let execution_result = instance.run_with_payload(payload).await?;
+                let map: HashMap<String, SharedValue> = execution_result
+                    .outputs
                     .into_iter()
                     .map(|(key, value)| (key.to_string(), value))
                     .collect();
 
-                outputs.insert(id, map);
+                outputs.insert(id.clone(), map);
+
+                run_event_callbacks(
+                    &self.registry,
+                    &nodes,
+                    &input_names,
+                    &mut outputs,
+                    &event_handlers,
+                    event_handlers.get(id),
+                    execution_result.events,
+                )
+                .await?;
             }
         }
 
@@ -270,6 +299,90 @@ impl Engine {
             T::from_shared_value(&unit).map_err(|_| crate::node::NodeError::NoPipelineResultDefined)
         }
     }
+}
+
+async fn run_event_callbacks(
+    registry: &Arc<NodeRegistry>,
+    nodes: &BTreeMap<Identifier, NodeInstruct>,
+    input_names: &std::collections::HashSet<String>,
+    outputs: &mut HashMap<Identifier, HashMap<String, SharedValue>>,
+    all_event_handlers: &BTreeMap<Identifier, BTreeMap<String, Vec<EventCallback>>>,
+    event_handlers: Option<&BTreeMap<String, Vec<EventCallback>>>,
+    emitted_events: Vec<crate::traits::EmittedEvent>,
+) -> Result<(), crate::node::NodeError> {
+    let mut queued_callbacks: VecDeque<(EventCallback, Option<SharedValue>)> = VecDeque::new();
+
+    for emitted_event in emitted_events {
+        if let Some(callbacks) = event_handlers.and_then(|handlers| handlers.get(&emitted_event.name)) {
+            for callback in callbacks {
+                queued_callbacks.push_back((callback.clone(), emitted_event.data.clone()));
+            }
+        }
+    }
+
+    while let Some((event_callback, event_payload)) = queued_callbacks.pop_front() {
+        match event_callback {
+            EventCallback::Value(callback_value) => {
+                if let Value::Relation {
+                    identifier, property, ..
+                } = callback_value
+                {
+                    if let Some(callback_node) = nodes.get(&identifier) {
+                        if callback_node.module != "_" && registry.has(&callback_node.module) {
+                            let mut callback_payload = resolve_inputs(callback_node, outputs, nodes, input_names)?;
+
+                            if let Some(value) = event_payload.clone() {
+                                callback_payload.insert(property, value);
+                            }
+
+                            let callback_instance = registry
+                                .create(&callback_node.module, Default::default())
+                                .ok_or_else(|| crate::node::NodeError::ModuleNotFound(callback_node.module.clone()))?;
+                            let callback_result = callback_instance.run_with_payload(callback_payload).await?;
+                            let callback_outputs: HashMap<String, SharedValue> = callback_result
+                                .outputs
+                                .into_iter()
+                                .map(|(key, value)| (key.to_string(), value))
+                                .collect();
+                            outputs.insert(identifier.clone(), callback_outputs);
+
+                            for emitted_event in callback_result.events {
+                                if let Some(callbacks) = all_event_handlers
+                                    .get(&identifier)
+                                    .and_then(|handlers| handlers.get(&emitted_event.name))
+                                {
+                                    for callback in callbacks {
+                                        queued_callbacks.push_back((callback.clone(), emitted_event.data.clone()));
+                                    }
+                                }
+                            }
+                        } else if let Some(value) = event_payload.clone() {
+                            outputs.entry(identifier).or_default().insert(property, value);
+                        }
+                    } else if let Some(value) = event_payload.clone() {
+                        outputs.entry(identifier).or_default().insert(property, value);
+                    }
+                } else {
+                    let _ = resolve_single_value(&callback_value, outputs, nodes, input_names)?;
+                }
+            }
+            EventCallback::Assignment(CallbackAssignment {
+                identifier,
+                property,
+                value,
+            }) => {
+                let resolved_value = resolve_single_value(&value, outputs, nodes, input_names)?;
+                outputs.entry(identifier).or_default().insert(property, resolved_value);
+            }
+            EventCallback::Block(callbacks) => {
+                for callback in callbacks {
+                    queued_callbacks.push_back((callback, event_payload.clone()));
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Build a directed dependency graph from parsed nodes.

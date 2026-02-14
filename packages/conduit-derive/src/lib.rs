@@ -172,8 +172,13 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
         impl conduit::traits::ExecutableNode for #struct_name {
             type Input = #struct_name_input;
             type Output = #output_ty;
+            type Event = String;
 
-            async fn run(&self, input: Self::Input) -> Result<Self::Output, conduit::node::NodeError> {
+            async fn run(
+                &self,
+                input: Self::Input,
+                _emitter: conduit::traits::Emitter<Self::Event>,
+            ) -> Result<Self::Output, conduit::node::NodeError> {
                 let func = |#(#inputs),*| async move #body;
                 #run_impl
             }
@@ -188,10 +193,14 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
             async fn run_with_payload(
                 &self,
                 payload: conduit::registry::Payload,
-            ) -> Result<Vec<(&'static str, conduit::node::SharedValue)>, conduit::node::NodeError> {
+            ) -> Result<conduit::traits::NodeExecutionResult, conduit::node::NodeError> {
+                let emitter = conduit::traits::Emitter::<<Self as conduit::traits::ExecutableNode>::Event>::default();
                 let input = <<Self as conduit::traits::ExecutableNode>::Input as conduit::traits::NodeInput>::from_payload(&payload)?;
-                let output = <Self as conduit::traits::ExecutableNode>::run(self, input).await?;
-                Ok(<<Self as conduit::traits::ExecutableNode>::Output as conduit::traits::NodeOutput>::into_outputs(output))
+                let output = <Self as conduit::traits::ExecutableNode>::run(self, input, emitter.clone()).await?;
+                Ok(conduit::traits::NodeExecutionResult {
+                    outputs: <<Self as conduit::traits::ExecutableNode>::Output as conduit::traits::NodeOutput>::into_outputs(output),
+                    events: emitter.into_events(),
+                })
             }
 
             fn input_fields(&self) -> Vec<&'static str> {
@@ -352,10 +361,14 @@ pub fn derive_node(input: TokenStream) -> TokenStream {
             async fn run_with_payload(
                 &self,
                 payload: conduit::registry::Payload,
-            ) -> Result<Vec<(&'static str, conduit::node::SharedValue)>, conduit::node::NodeError> {
+            ) -> Result<conduit::traits::NodeExecutionResult, conduit::node::NodeError> {
+                let emitter = conduit::traits::Emitter::<<Self as conduit::traits::ExecutableNode>::Event>::default();
                 let input = <<Self as conduit::traits::ExecutableNode>::Input as conduit::traits::NodeInput>::from_payload(&payload)?;
-                let output = <Self as conduit::traits::ExecutableNode>::run(self, input).await?;
-                Ok(<<Self as conduit::traits::ExecutableNode>::Output as conduit::traits::NodeOutput>::into_outputs(output))
+                let output = <Self as conduit::traits::ExecutableNode>::run(self, input, emitter.clone()).await?;
+                Ok(conduit::traits::NodeExecutionResult {
+                    outputs: <<Self as conduit::traits::ExecutableNode>::Output as conduit::traits::NodeOutput>::into_outputs(output),
+                    events: emitter.into_events(),
+                })
             }
 
             fn input_fields(&self) -> Vec<&'static str> {

@@ -1,7 +1,10 @@
 use crate::node::{NodeError, SharedValue};
 use crate::registry::Payload;
 use async_trait::async_trait;
+use std::any::Any;
+use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 // -- Conversion traits for Input/Output types --
 
@@ -137,6 +140,71 @@ impl_as_input_identity!(Vec<u8>);
 impl_as_input_identity!(Vec<String>);
 impl_as_input_identity!(Vec<&'static str>);
 
+#[derive(Clone)]
+pub struct EmittedEvent {
+    pub name: String,
+    pub data: Option<SharedValue>,
+}
+
+pub struct Emitter<Event>
+where
+    Event: Into<String> + Send + Sync + 'static,
+{
+    events: Arc<Mutex<Vec<EmittedEvent>>>,
+    marker: PhantomData<Event>,
+}
+
+impl<Event> Clone for Emitter<Event>
+where
+    Event: Into<String> + Send + Sync + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            events: self.events.clone(),
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<Event> Default for Emitter<Event>
+where
+    Event: Into<String> + Send + Sync + 'static,
+{
+    fn default() -> Self {
+        Self {
+            events: Arc::new(Mutex::new(Vec::new())),
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<Event> Emitter<Event>
+where
+    Event: Into<String> + Send + Sync + 'static,
+{
+    pub async fn emit<T>(&self, event: Event, data: Option<T>)
+    where
+        T: Any + Send + Sync + 'static,
+    {
+        let payload = data.map(|value| Arc::new(value) as SharedValue);
+        let mut events = self.events.lock().expect("event emitter mutex poisoned");
+        events.push(EmittedEvent {
+            name: event.into(),
+            data: payload,
+        });
+    }
+
+    pub fn into_events(self) -> Vec<EmittedEvent> {
+        let mut events = self.events.lock().expect("event emitter mutex poisoned");
+        std::mem::take(&mut *events)
+    }
+}
+
+pub struct NodeExecutionResult {
+    pub outputs: Vec<(&'static str, SharedValue)>,
+    pub events: Vec<EmittedEvent>,
+}
+
 // -- User-facing trait (not object-safe) --
 
 /// Trait that node authors implement. Associated types define input/output shape;
@@ -145,8 +213,9 @@ impl_as_input_identity!(Vec<&'static str>);
 pub trait ExecutableNode: Send + Sync + 'static {
     type Input: NodeInput;
     type Output: NodeOutput;
+    type Event: Into<String> + Send + Sync + 'static;
 
-    async fn run(&self, input: Self::Input) -> Result<Self::Output, NodeError>;
+    async fn run(&self, input: Self::Input, emitter: Emitter<Self::Event>) -> Result<Self::Output, NodeError>;
 }
 
 // -- Object-safe trait used by the engine --
@@ -156,7 +225,7 @@ pub trait ExecutableNode: Send + Sync + 'static {
 pub trait DynNode: Send + Sync {
     fn name(&self) -> &'static str;
 
-    async fn run_with_payload(&self, payload: Payload) -> Result<Vec<(&'static str, SharedValue)>, NodeError>;
+    async fn run_with_payload(&self, payload: Payload) -> Result<NodeExecutionResult, NodeError>;
 
     fn input_fields(&self) -> Vec<&'static str>;
     fn output_fields(&self) -> Vec<&'static str>;

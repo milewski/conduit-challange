@@ -5,7 +5,7 @@ use pest::iterators::{Pair, Pairs};
 use pest::pratt_parser::{Assoc, Op, PrattParser};
 use pest_derive::Parser;
 use std::any::TypeId;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Index;
 use uuid::Uuid;
 
@@ -66,6 +66,20 @@ pub enum Value {
         direction: Direction,
         values: Vec<Value>,
     },
+}
+
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
+pub struct CallbackAssignment {
+    pub identifier: Identifier,
+    pub property: Property,
+    pub value: Value,
+}
+
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
+pub enum EventCallback {
+    Value(Value),
+    Assignment(CallbackAssignment),
+    Block(Vec<EventCallback>),
 }
 
 impl Value {
@@ -139,16 +153,20 @@ impl NodeInstruct {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Eq, Hash)]
+#[derive(Debug, PartialEq, Clone, Eq)]
 pub struct ParsedWorkflow {
     pub nodes: BTreeMap<Identifier, NodeInstruct>,
     pub inputs: BTreeMap<Identifier, Option<Value>>,
+    pub event_handlers: BTreeMap<Identifier, BTreeMap<String, Vec<EventCallback>>>,
+    pub event_callback_nodes: HashSet<Identifier>,
 }
 
 #[derive(Debug, Default)]
 struct Visitor {
     nodes: BTreeMap<Identifier, NodeInstruct>,
     inputs: BTreeMap<Identifier, Option<Value>>,
+    event_handlers: BTreeMap<Identifier, BTreeMap<String, Vec<EventCallback>>>,
+    event_callback_nodes: HashSet<Identifier>,
     external_inputs: HashMap<Identifier, SharedValue>,
     scope: HashMap<Identifier, Value>,
     aliases: HashMap<Identifier, Identifier>,
@@ -163,6 +181,161 @@ fn expression_parser() -> PrattParser<Rule> {
 }
 
 impl Visitor {
+    fn ensure_callback_node(&mut self, callback_name: &str) -> Result<Identifier, ParserError> {
+        if let Some(existing_alias) = self.aliases.get(callback_name) {
+            return Ok(existing_alias.clone());
+        }
+
+        if self.nodes.contains_key(callback_name) {
+            return Ok(callback_name.to_string());
+        }
+
+        let callback_node = NodeInstruct::new(Some(callback_name), callback_name);
+
+        if self.nodes.contains_key(&callback_node.identifier) {
+            return Err(ParserError::DuplicatedNode {
+                identifier: callback_node.identifier,
+            });
+        }
+
+        let callback_identifier = callback_node.identifier.clone();
+        self.event_callback_nodes.insert(callback_identifier.clone());
+        self.nodes.insert(callback_identifier.clone(), callback_node);
+        Ok(callback_identifier)
+    }
+
+    fn parse_callback_assignment(
+        &mut self,
+        callback_assignment: Pair<Rule>,
+    ) -> Result<CallbackAssignment, ParserError> {
+        assert_eq!(callback_assignment.as_rule(), Rule::callback_assignment);
+        let mut pairs = callback_assignment.into_inner();
+        let relation_pair = pairs.next().unwrap_or_else(|| unreachable!());
+        let value_pair = pairs.next().unwrap_or_else(|| unreachable!());
+
+        let mut relation_parts = relation_pair.into_inner();
+        let identifier_pair = relation_parts.next().unwrap_or_else(|| unreachable!());
+        let property_pair = relation_parts.next().unwrap_or_else(|| unreachable!());
+
+        let identifier_string = identifier_pair.as_str();
+        let resolved_identifier = self
+            .aliases
+            .get(identifier_string)
+            .cloned()
+            .unwrap_or_else(|| identifier_string.to_string());
+
+        let callback_value = self.visit_value(
+            value_pair.into_inner().next().unwrap_or_else(|| unreachable!()),
+            Direction::Input,
+        )?;
+
+        Ok(CallbackAssignment {
+            identifier: resolved_identifier,
+            property: property_pair.as_str().to_string(),
+            value: callback_value,
+        })
+    }
+
+    fn parse_event_callback(&mut self, event_callback: Pair<Rule>) -> Result<EventCallback, ParserError> {
+        assert_eq!(event_callback.as_rule(), Rule::event_callback);
+        let callback_inner = event_callback.into_inner().next().unwrap_or_else(|| unreachable!());
+
+        match callback_inner.as_rule() {
+            Rule::value => {
+                let callback_value_pair = callback_inner.into_inner().next().unwrap_or_else(|| unreachable!());
+                let callback_value_rule = callback_value_pair.as_rule();
+                let mut callback_value = self.visit_value(callback_value_pair, Direction::Input)?;
+
+                if let Value::Relation {
+                    identifier,
+                    direction,
+                    property,
+                } = &mut callback_value
+                {
+                    if callback_value_rule == Rule::identifier && *direction == Direction::Input && property == "output"
+                    {
+                        let _ = self.ensure_callback_node(identifier)?;
+                        *property = "input".to_string();
+                    }
+
+                    if callback_value_rule == Rule::relation
+                        && !self.nodes.contains_key(identifier)
+                        && !self.aliases.contains_key(identifier)
+                    {
+                        let _ = self.ensure_callback_node(identifier)?;
+                    }
+
+                    if matches!(callback_value_rule, Rule::node | Rule::anonymous_node) {
+                        self.event_callback_nodes.insert(identifier.clone());
+                        if *direction == Direction::Input && property == "output" {
+                            *property = "input".to_string();
+                        }
+                    }
+                }
+
+                Ok(EventCallback::Value(callback_value))
+            }
+            Rule::callback_block => {
+                let mut callbacks = Vec::new();
+
+                for callback_statement in callback_inner.into_inner() {
+                    let statement = callback_statement.into_inner().next().unwrap_or_else(|| unreachable!());
+                    match statement.as_rule() {
+                        Rule::callback_assignment => {
+                            callbacks.push(EventCallback::Assignment(self.parse_callback_assignment(statement)?));
+                        }
+                        Rule::node | Rule::anonymous_node => {
+                            let mut node_value = self.visit_value(statement, Direction::Input)?;
+                            if let Value::Relation {
+                                identifier,
+                                direction,
+                                property,
+                            } = &mut node_value
+                            {
+                                if *direction == Direction::Input && property == "output" {
+                                    *property = "input".to_string();
+                                }
+                                self.event_callback_nodes.insert(identifier.clone());
+                            }
+                            callbacks.push(EventCallback::Value(node_value));
+                        }
+                        _ => unreachable!("Unexpected callback statement: {:?}", statement.as_rule()),
+                    }
+                }
+
+                Ok(EventCallback::Block(callbacks))
+            }
+            _ => unreachable!("Unexpected callback rule: {:?}", callback_inner.as_rule()),
+        }
+    }
+
+    fn visit_event_handler(&mut self, node: &mut NodeInstruct, event_handler: Pair<Rule>) -> Result<(), ParserError> {
+        assert_eq!(event_handler.as_rule(), Rule::event_handler);
+        let mut pairs = event_handler.into_inner();
+        let event_names_pair = pairs.next().unwrap_or_else(|| unreachable!());
+        let callback_pair = pairs.next().unwrap_or_else(|| unreachable!());
+        let parsed_callback = self.parse_event_callback(callback_pair)?;
+
+        let event_names: Vec<String> = match event_names_pair.as_rule() {
+            Rule::event_names => event_names_pair
+                .into_inner()
+                .map(|event_name_pair| event_name_pair.as_str().to_string())
+                .collect(),
+            _ => unreachable!(),
+        };
+
+        for event_name in event_names {
+            self.event_handlers
+                .entry(node.identifier.clone())
+                .or_default()
+                .entry(event_name)
+                .or_default()
+                .push(parsed_callback.clone());
+        }
+
+        Ok(())
+    }
+
     pub fn visit_for_loop(&mut self, pair: Pair<Rule>) -> Result<(), ParserError> {
         assert_eq!(pair.as_rule(), Rule::for_loop);
         let mut pairs = pair.into_inner();
@@ -439,42 +612,45 @@ impl Visitor {
         assert_eq!(body.as_rule(), Rule::body);
 
         for pair in body.into_inner() {
-            assert_eq!(pair.as_rule(), Rule::parameter);
+            assert_eq!(pair.as_rule(), Rule::body_item);
+            let body_item = pair.into_inner().next().unwrap_or_else(|| unreachable!());
 
-            let mut pairs = pair.into_inner();
+            match body_item.as_rule() {
+                Rule::parameter => {
+                    let mut pairs = body_item.into_inner();
+                    let first = pairs.next().unwrap_or_else(|| unreachable!());
 
-            let first = pairs.next().unwrap_or_else(|| unreachable!());
+                    let (property_name, direction_pair, value_pair) = if first.as_rule() == Rule::property {
+                        let direction = pairs.next().unwrap_or_else(|| unreachable!());
+                        let value = pairs.next().unwrap_or_else(|| unreachable!());
+                        (first.as_str().to_string(), direction, value)
+                    } else if first.as_rule() == Rule::direction {
+                        let direction = first;
+                        let value = pairs.next().unwrap_or_else(|| unreachable!());
+                        let direction_string = direction.as_str();
+                        let property_name = match direction_string {
+                            "<-" => "input".to_string(),
+                            "->" => "output".to_string(),
+                            _ => unreachable!(),
+                        };
+                        (property_name, direction, value)
+                    } else {
+                        unreachable!("Unexpected rule in parameter: {:?}", first.as_rule());
+                    };
 
-            let (property_name, direction_pair, value_pair) = if first.as_rule() == Rule::property {
-                let direction = pairs.next().unwrap_or_else(|| unreachable!());
-                let value = pairs.next().unwrap_or_else(|| unreachable!());
-                (first.as_str().to_string(), direction, value)
-            } else if first.as_rule() == Rule::direction {
-                let direction = first;
-                let value = pairs.next().unwrap_or_else(|| unreachable!());
+                    assert_eq!(direction_pair.as_rule(), Rule::direction);
+                    assert_eq!(value_pair.as_rule(), Rule::value);
 
-                // We need to parse direction enum here to decide default property name
-                // Note: We can reuse the existing From implementation logic or check raw string
-                let dir_str = direction.as_str();
-                let prop_name = match dir_str {
-                    "<-" => "input".to_string(),
-                    "->" => "output".to_string(),
-                    _ => unreachable!(),
-                };
-                (prop_name, direction, value)
-            } else {
-                unreachable!("Unexpected rule in parameter: {:?}", first.as_rule());
-            };
-
-            assert_eq!(direction_pair.as_rule(), Rule::direction);
-            assert_eq!(value_pair.as_rule(), Rule::value);
-
-            let inner = value_pair.into_inner().next().unwrap_or_else(|| unreachable!());
-            let direction: Direction = direction_pair.into();
-
-            let value = self.visit_value(inner, direction)?;
-
-            node.inputs.insert(property_name, value);
+                    let inner = value_pair.into_inner().next().unwrap_or_else(|| unreachable!());
+                    let direction: Direction = direction_pair.into();
+                    let value = self.visit_value(inner, direction)?;
+                    node.inputs.insert(property_name, value);
+                }
+                Rule::event_handler => {
+                    self.visit_event_handler(node, body_item)?;
+                }
+                _ => unreachable!("Unexpected rule in node body: {:?}", body_item.as_rule()),
+            }
         }
 
         Ok(())
@@ -936,9 +1112,12 @@ impl<'a> NodeParser<'a> {
         }
 
         self.visitor.link()?;
+
         Ok(ParsedWorkflow {
             nodes: self.visitor.nodes,
             inputs: self.visitor.inputs,
+            event_handlers: self.visitor.event_handlers,
+            event_callback_nodes: self.visitor.event_callback_nodes,
         })
     }
 }
