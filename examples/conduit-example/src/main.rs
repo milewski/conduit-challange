@@ -1,6 +1,6 @@
 use conduit::node::NodeError;
 use conduit::traits::Emitter;
-use conduit::{graphviz, try_graphviz, try_pipeline};
+use conduit::{graphviz, input, try_graphviz, try_pipeline};
 use conduit_derive::{NodeEvent, node};
 use std::io::Write;
 
@@ -39,37 +39,16 @@ async fn prompt(#[input] question: String, emitter: Emitter<PromptEvents>) -> Re
 }
 
 fn main() {
-    let pipeline = r#"
-        prompt {
-            <- "Enter the desired width?"
-            on answer width {
-                prompt {
-                    <- "Awesome the width was: { width }, how about the height?"
-                    on answer height {
-                        config _ {
-                            width <- width
-                            height <- height
-                        }
-                    }
-                }
-            }
-        }
-
-        <-  resizer {
-            <- read_file <- "./examples/conduit-example/cover.png"
-            width <- config::width
-            height <- config::height
-            -> write_file {
-                destination <- "./examples/conduit-example/cover.example.png"
-            }
-        }
-    "#;
-
+    let pipeline = include_str!("./plan.conduit");
     let graph = graphviz!(pipeline);
+    let input = input! {
+        source: "./examples/conduit-example/cover.png",
+        destination: "./examples/conduit-example/cover.resized.png",
+    };
 
-    // println!("{}", graph);
+    println!("{}", graph);
 
-    let result: Result<Vec<u8>, _> = try_pipeline!(pipeline);
+    let result: Result<Vec<u8>, _> = try_pipeline!(input, pipeline);
 
     match result {
         Ok(data) => println!("{} bytes", data.len()),

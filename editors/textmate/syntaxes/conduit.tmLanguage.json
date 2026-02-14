@@ -1,0 +1,196 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Conduit DSL",
+  "scopeName": "source.conduit",
+  "fileTypes": [
+    "conduit"
+  ],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#eventHandlers" },
+    { "include": "#keywords" },
+    { "include": "#nodeDeclarationsNamed" },
+    { "include": "#pipelineOperators" },
+    { "include": "#nodeAfterFlowOperator" },
+    { "include": "#propertyAssignments" },
+    { "include": "#relations" },
+    { "include": "#numbers" },
+    { "include": "#booleans" },
+    { "include": "#punctuation" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "name": "comment.line.number-sign.conduit",
+      "match": "#.*$"
+    },
+    "strings": {
+      "name": "string.quoted.double.conduit",
+      "begin": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.conduit" }
+      },
+      "end": "\"",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.conduit" }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.conduit",
+          "match": "\\\\(?:[\"\\\\/bfnrt]|u[0-9A-Fa-f]{4}|\\{)"
+        },
+        {
+          "name": "meta.interpolation.conduit",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.interpolation.begin.conduit" }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.interpolation.end.conduit" }
+          },
+          "patterns": [
+            { "include": "#relations" },
+            { "include": "#numbers" },
+            { "include": "#booleans" },
+            {
+              "name": "keyword.operator.arithmetic.conduit",
+              "match": "(\\+|-|\\*|/|\\^)"
+            },
+            {
+              "name": "keyword.operator.range.conduit",
+              "match": "\\.\\."
+            },
+            {
+              "name": "variable.other.reference.conduit",
+              "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+            },
+            {
+              "name": "punctuation.section.group.conduit",
+              "match": "[()\\[\\],]"
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.conduit",
+          "match": "\\b(for|in)\\b"
+        }
+      ]
+    },
+    "eventHandlers": {
+      "patterns": [
+        {
+          "name": "meta.event.handler.conduit",
+          "match": "\\b(on)\\b\\s*([A-Za-z_][A-Za-z0-9_]*|\\[[^\\]]*\\])",
+          "captures": {
+            "1": { "name": "keyword.control.event.conduit" },
+            "2": { "name": "entity.name.tag.event.conduit" }
+          }
+        }
+      ]
+    },
+    "pipelineOperators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.flow.conduit",
+          "match": "(<-|->)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.conduit",
+          "match": "(\\+|-|\\*|/|\\^)"
+        },
+        {
+          "name": "keyword.operator.range.conduit",
+          "match": "\\.\\."
+        }
+      ]
+    },
+    "nodeAfterFlowOperator": {
+      "patterns": [
+        {
+          "name": "meta.node.inline.conduit",
+          "match": "(<-|->)\\s*([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)?)(?=\\s*(?:\\{|<-|->))",
+          "captures": {
+            "1": { "name": "keyword.operator.flow.conduit" },
+            "2": { "name": "support.type.module.conduit" }
+          }
+        }
+      ]
+    },
+    "nodeDeclarationsNamed": {
+      "patterns": [
+        {
+          "name": "meta.node.declaration.named.conduit",
+          "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)(\\s+)([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)?)(?=\\s*(?:\\{|<-|->))",
+          "captures": {
+            "1": { "name": "entity.name.function.node.conduit" },
+            "3": { "name": "support.type.module.conduit" }
+          }
+        }
+      ]
+    },
+    "propertyAssignments": {
+      "patterns": [
+        {
+          "name": "variable.parameter.property.conduit",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*(?:<-|->))"
+        },
+        {
+          "name": "variable.parameter.property-list.conduit",
+          "match": "(?<=\\[)\\s*[A-Za-z_][A-Za-z0-9_]*(?:\\s*,\\s*[A-Za-z_][A-Za-z0-9_]*)+\\s*(?=\\])"
+        }
+      ]
+    },
+    "relations": {
+      "name": "meta.relation.conduit",
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(::)([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": { "name": "variable.other.object.conduit" },
+        "2": { "name": "punctuation.accessor.double-colon.conduit" },
+        "3": { "name": "variable.other.property.conduit" }
+      }
+    },
+    "numbers": {
+      "name": "constant.numeric.conduit",
+      "match": "\\b-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?\\b"
+    },
+    "booleans": {
+      "name": "constant.language.boolean.conduit",
+      "match": "\\b(true|false)\\b"
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.block.begin.conduit",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.section.block.end.conduit",
+          "match": "\\}"
+        },
+        {
+          "name": "punctuation.section.group.begin.conduit",
+          "match": "[\\(\\[]"
+        },
+        {
+          "name": "punctuation.section.group.end.conduit",
+          "match": "[\\)\\]]"
+        },
+        {
+          "name": "punctuation.separator.comma.conduit",
+          "match": ","
+        }
+      ]
+    },
+    "identifiers": {
+      "name": "variable.other.identifier.conduit",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+    }
+  },
+  "uuid": "357c6ceb-4e72-4c96-bf5e-35bc79fcfd39"
+}

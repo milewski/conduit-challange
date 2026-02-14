@@ -1,0 +1,27 @@
+# This is an example of a simple plan that resizes an image based on user input for width and height.
+-> source
+-> destination
+
+prompt {
+    <- "Enter the desired width?"
+    on answer width {
+        prompt {
+            <- "Awesome the width was: { width }, how about the height?"
+            on answer height {
+                config _ {
+                    width <- width
+                    height <- height
+                }
+            }
+        }
+    }
+}
+
+<- resizer {
+    <- read_file <- source
+    width <- config::width
+    height <- config::height
+    -> write_file {
+        destination <- destination
+    }
+}

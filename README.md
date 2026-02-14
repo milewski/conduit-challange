@@ -13,6 +13,7 @@ Conduit is a domain-specific language (DSL) for creating node-based workflows in
 - [Anonymous Nodes](#anonymous-nodes)
 - [Node Sharing and Chaining](#node-sharing-and-chaining)
 - [Examples](#examples)
+- [Editor Support](#editor-support)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -196,6 +197,10 @@ The true power of Conduit emerges when you create reusable nodes and chain them 
 ## Examples
 
 Check out the [examples directory](./examples) for complete workflow examples.
+
+## Editor Support
+
+TextMate syntax highlighting for `.conduit` files is available in [`./editors`](./editors).
 
 ## Contributing
 
