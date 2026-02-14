@@ -278,3 +278,19 @@ fn test_error_is_thrown_if_property_does_not_exist() {
 
     assert!(matches!(output, Err(NodeError::ModuleValidationError(_))));
 }
+
+#[test]
+fn test_properties_can_be_mass_assigned() {
+    let output: (u32, u32) = pipeline! {r#"
+        <- multiplier {
+            a <- 5
+            b <- 5
+        }
+
+        <- multiplier {
+            [a, b] <- 2
+        }
+    "#};
+
+    assert_eq!(output, (25, 4));
+}

@@ -16,7 +16,9 @@ shorthand = { direction ~ value }
 body = { "{" ~ NEWLINE* ~ (body_item ~ NEWLINE*)* ~ "}" }
 body_item = { event_handler | parameter }
 
-parameter = { property? ~ direction ~ value }
+parameter = { parameter_target? ~ direction ~ value }
+parameter_target = { property | property_list }
+property_list = { "[" ~ property ~ ("," ~ property)+ ~ "]" }
 
 event_handler = { "on" ~ event_names ~ "->" ~ event_callback }
 event_names = { identifier | "[" ~ identifier ~ ("," ~ identifier)* ~ "]" }

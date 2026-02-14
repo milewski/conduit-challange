@@ -620,20 +620,30 @@ impl Visitor {
                     let mut pairs = body_item.into_inner();
                     let first = pairs.next().unwrap_or_else(|| unreachable!());
 
-                    let (property_name, direction_pair, value_pair) = if first.as_rule() == Rule::property {
+                    let (property_names, direction_pair, value_pair) = if first.as_rule() == Rule::parameter_target {
+                        let mut target_pairs = first.into_inner();
+                        let target = target_pairs.next().unwrap_or_else(|| unreachable!());
                         let direction = pairs.next().unwrap_or_else(|| unreachable!());
                         let value = pairs.next().unwrap_or_else(|| unreachable!());
-                        (first.as_str().to_string(), direction, value)
+                        let names = match target.as_rule() {
+                            Rule::property => vec![target.as_str().to_string()],
+                            Rule::property_list => target
+                                .into_inner()
+                                .map(|property| property.as_str().to_string())
+                                .collect(),
+                            _ => unreachable!("Unexpected parameter target: {:?}", target.as_rule()),
+                        };
+                        (names, direction, value)
                     } else if first.as_rule() == Rule::direction {
                         let direction = first;
                         let value = pairs.next().unwrap_or_else(|| unreachable!());
                         let direction_string = direction.as_str();
-                        let property_name = match direction_string {
-                            "<-" => "input".to_string(),
-                            "->" => "output".to_string(),
+                        let property_names = match direction_string {
+                            "<-" => vec!["input".to_string()],
+                            "->" => vec!["output".to_string()],
                             _ => unreachable!(),
                         };
-                        (property_name, direction, value)
+                        (property_names, direction, value)
                     } else {
                         unreachable!("Unexpected rule in parameter: {:?}", first.as_rule());
                     };
@@ -644,7 +654,10 @@ impl Visitor {
                     let inner = value_pair.into_inner().next().unwrap_or_else(|| unreachable!());
                     let direction: Direction = direction_pair.into();
                     let value = self.visit_value(inner, direction)?;
-                    node.inputs.insert(property_name, value);
+
+                    for property_name in property_names {
+                        node.inputs.insert(property_name, value.clone());
+                    }
                 }
                 Rule::event_handler => {
                     self.visit_event_handler(node, body_item)?;
