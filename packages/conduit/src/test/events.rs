@@ -123,3 +123,43 @@ fn test_event_callbacks_execute_while_emitter_is_running() {
 
     assert_eq!(output, 1);
 }
+
+#[test]
+fn test_event_callback_uses_implicit_payload_name() {
+    let output: u32 = pipeline! {r#"
+        store _ {
+            counter <- 0
+        }
+
+        task {
+            count <- 2
+            on done -> {
+                store::counter <- done
+            }
+        }
+
+        <- store::counter
+    "#};
+
+    assert_eq!(output, 2);
+}
+
+#[test]
+fn test_event_callback_uses_explicit_payload_alias() {
+    let output: u32 = pipeline! {r#"
+        store _ {
+            counter <- 0
+        }
+
+        task {
+            count <- 2
+            on done current -> {
+                store::counter <- current
+            }
+        }
+
+        <- store::counter
+    "#};
+
+    assert_eq!(output, 2);
+}

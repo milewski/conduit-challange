@@ -133,6 +133,7 @@ struct Schema;
 
 pub type Identifier = String;
 pub type Property = String;
+pub const EVENT_PAYLOAD_IDENTIFIER: &str = "__event_payload__";
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct NodeInstruct {
@@ -313,9 +314,6 @@ impl Visitor {
         assert_eq!(event_handler.as_rule(), Rule::event_handler);
         let mut pairs = event_handler.into_inner();
         let event_names_pair = pairs.next().unwrap_or_else(|| unreachable!());
-        let callback_pair = pairs.next().unwrap_or_else(|| unreachable!());
-        let parsed_callback = self.parse_event_callback(callback_pair)?;
-
         let event_names: Vec<String> = match event_names_pair.as_rule() {
             Rule::event_names => event_names_pair
                 .into_inner()
@@ -323,6 +321,47 @@ impl Visitor {
                 .collect(),
             _ => unreachable!(),
         };
+
+        let next_pair = pairs.next().unwrap_or_else(|| unreachable!());
+        let (event_payload_alias, callback_pair) = if next_pair.as_rule() == Rule::event_payload_alias {
+            (
+                Some(next_pair.as_str().to_string()),
+                pairs.next().unwrap_or_else(|| unreachable!()),
+            )
+        } else {
+            (None, next_pair)
+        };
+
+        let default_event_payload_alias = if event_names.len() == 1 {
+            event_names.first().cloned()
+        } else {
+            None
+        };
+
+        let payload_alias_to_use = event_payload_alias.or(default_event_payload_alias);
+
+        let previous_scope_value = if let Some(payload_alias) = payload_alias_to_use.as_ref() {
+            self.scope.insert(
+                payload_alias.clone(),
+                Value::Relation {
+                    identifier: EVENT_PAYLOAD_IDENTIFIER.to_string(),
+                    direction: Direction::Input,
+                    property: "value".to_string(),
+                },
+            )
+        } else {
+            None
+        };
+
+        let parsed_callback = self.parse_event_callback(callback_pair)?;
+
+        if let Some(payload_alias) = payload_alias_to_use {
+            if let Some(previous_scope_value) = previous_scope_value {
+                self.scope.insert(payload_alias, previous_scope_value);
+            } else {
+                self.scope.remove(&payload_alias);
+            }
+        }
 
         for event_name in event_names {
             self.event_handlers
@@ -1027,6 +1066,10 @@ impl Visitor {
                 direction,
                 property,
             } => {
+                if identifier == EVENT_PAYLOAD_IDENTIFIER {
+                    return;
+                }
+
                 updates.push((
                     identifier.clone(),
                     property.clone(),
@@ -1352,6 +1395,79 @@ mod tests {
         } else {
             panic!("Expected Numeric value for width");
         }
+    }
+
+    #[test]
+    fn test_event_handler_payload_aliases() {
+        let implicit_alias_workflow = NodeParser::parse(
+            r#"
+            store _ { counter <- 0 }
+            source task {
+                count <- 1
+                on done -> {
+                    store::counter <- done
+                }
+            }
+            "#,
+        )
+        .expect("implicit payload alias should parse");
+
+        let implicit_callbacks = implicit_alias_workflow
+            .event_handlers
+            .get("source")
+            .and_then(|handlers| handlers.get("done"))
+            .expect("done callbacks should exist");
+        let EventCallback::Block(implicit_statements) = &implicit_callbacks[0] else {
+            panic!("expected callback block")
+        };
+        let EventCallback::Assignment(implicit_assignment) = &implicit_statements[0] else {
+            panic!("expected callback assignment")
+        };
+        let Value::Relation {
+            identifier: implicit_identifier,
+            property: implicit_property,
+            ..
+        } = &implicit_assignment.value
+        else {
+            panic!("expected relation for implicit payload value")
+        };
+        assert_eq!(implicit_identifier, EVENT_PAYLOAD_IDENTIFIER);
+        assert_eq!(implicit_property, "value");
+
+        let explicit_alias_workflow = NodeParser::parse(
+            r#"
+            store _ { counter <- 0 }
+            source task {
+                count <- 1
+                on done payload -> {
+                    store::counter <- payload
+                }
+            }
+            "#,
+        )
+        .expect("explicit payload alias should parse");
+
+        let explicit_callbacks = explicit_alias_workflow
+            .event_handlers
+            .get("source")
+            .and_then(|handlers| handlers.get("done"))
+            .expect("done callbacks should exist");
+        let EventCallback::Block(explicit_statements) = &explicit_callbacks[0] else {
+            panic!("expected callback block")
+        };
+        let EventCallback::Assignment(explicit_assignment) = &explicit_statements[0] else {
+            panic!("expected callback assignment")
+        };
+        let Value::Relation {
+            identifier: explicit_identifier,
+            property: explicit_property,
+            ..
+        } = &explicit_assignment.value
+        else {
+            panic!("expected relation for explicit payload value")
+        };
+        assert_eq!(explicit_identifier, EVENT_PAYLOAD_IDENTIFIER);
+        assert_eq!(explicit_property, "value");
     }
 }
 

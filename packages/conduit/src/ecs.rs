@@ -1,6 +1,6 @@
 use crate::dsl::parser::{
-    CallbackAssignment, Direction, EventCallback, Expression, Identifier, NodeInstruct, NodeParser, Operation,
-    PIPELINE_RESULT_ID, ParsedWorkflow, StringPart, Value,
+    CallbackAssignment, Direction, EVENT_PAYLOAD_IDENTIFIER, EventCallback, Expression, Identifier, NodeInstruct,
+    NodeParser, Operation, PIPELINE_RESULT_ID, ParsedWorkflow, StringPart, Value,
 };
 use crate::node::FromSharedValue;
 use crate::node::SharedValue;
@@ -404,6 +404,13 @@ async fn run_event_callbacks(
     }
 
     while let Some((event_callback, event_payload)) = queued_callbacks.pop_front() {
+        if let Some(payload_value) = event_payload.clone() {
+            outputs
+                .entry(EVENT_PAYLOAD_IDENTIFIER.to_string())
+                .or_default()
+                .insert("value".to_string(), payload_value);
+        }
+
         match event_callback {
             EventCallback::Value(callback_value) => {
                 if let Value::Relation {
@@ -454,6 +461,8 @@ async fn run_event_callbacks(
                 }
             }
         }
+
+        outputs.remove(EVENT_PAYLOAD_IDENTIFIER);
     }
 
     Ok(())
