@@ -8,11 +8,12 @@
   "navigation": {
     "pages": [
       "home",
+      "quick-start",
       "overview",
-      "keywords-operators",
       "node-syntax",
+      "rust-nodes",
       "expressions",
-      "usage-patterns",
+      "control-flow",
       "examples",
       "references"
     ]

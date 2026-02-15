@@ -1,35 +1,41 @@
----
-title: Examples
----
-
 # Examples
 
-## Basic Node
-```
-input -> x, y
-nodeA moduleA -> 42
-```
+This section highlights practical examples included in the repository and explains what they demonstrate.
 
-## For Loop
-```
-for i in 0..10 {
-  nodeA moduleA -> i
+Image resize example
+
+Path: `examples/conduit-example`
+
+This example demonstrates an interactive image processing workflow that:
+
+1. Reads an image from disk using `read_file`.
+2. Resizes the image with `resizer` (or `resize`).
+3. Saves the result with `save_file`.
+
+DSL snippet:
+
+```dsl
+source read_file <- "cover.png"
+resizer {
+  source <- source
+  width <- 512
+  height <- 256
+  -> save_file <- "cover.resized.png"
 }
 ```
 
-## Event Handler
-```
-on event -> { ... }
-```
+Arithmetic and store example
 
-## Inline Node
-```
-name module { property <- anonymous_module::custom {} }
-```
+Path: `examples/conduit-example/examples/arithmetic.rs`
 
-## Expression
-```
-name module { width <- (32 * config::multiplier) }
-```
+This demonstrates using `store` to hold values and simple arithmetic expressions inside the pipeline.
 
-See [References](./references.md) for more test cases and snapshots.
+Looping example
+
+Path: `examples/conduit-example/examples/for_loop.rs`
+
+Shows how to build arrays using `store::paths <<- ...` and iterate with `for` blocks to accumulate results.
+
+Exploring the examples
+
+Run the examples in the `examples` directory and open the Rust source files to see real node implementations and DSL usage patterns. These working examples are the best way to learn how nodes, expressions, and control flow work together.
