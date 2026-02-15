@@ -327,6 +327,28 @@ fn test_mixed_types_in_array_error_has_help_text() {
 }
 
 #[test]
+fn test_append_mixed_type_to_existing_array_returns_error() {
+    let output: Result<(), _> = try_pipeline! {r#"
+        store _ {
+            paths <- ["cover.128.png"]
+        }
+
+        store::paths <<- 256
+    "#};
+
+    let error_message = match output {
+        Err(NodeError::ParseError(message)) => message,
+        other => panic!("Expected ParseError, got: {:?}", other),
+    };
+
+    assert!(
+        error_message.contains("Mixed Types In Array"),
+        "Should contain mixed type error, got: {}",
+        error_message
+    );
+}
+
+#[test]
 fn test_syntax_error_message_shows_source_line_content() {
     let output: Result<(), _> = try_pipeline! {r#"
         store _ { path <- }

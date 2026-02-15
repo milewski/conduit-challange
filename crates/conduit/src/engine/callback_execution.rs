@@ -156,6 +156,19 @@ impl<'a> CallbackExecutionContext<'a> {
                                 }
                                 None => Vec::new(),
                             };
+
+                            if let Some(first_value) = values.first() {
+                                let first_value_type = first_value.as_ref().type_id();
+                                let new_value_type = resolved_value.as_ref().type_id();
+
+                                if first_value_type != new_value_type {
+                                    return Err(crate::node::NodeError::Custom(format!(
+                                        "Cannot append value with different type to array '{}'",
+                                        property
+                                    )));
+                                }
+                            }
+
                             values.push(resolved_value);
                             node_outputs.insert(property, Arc::new(values));
                         }

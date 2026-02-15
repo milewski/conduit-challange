@@ -754,6 +754,18 @@ impl Visitor {
                             }
                             None => Vec::new(),
                         };
+
+                        if let Some(first_value) = values.first() {
+                            let first_value_discriminant = std::mem::discriminant(first_value);
+                            let new_value_discriminant = std::mem::discriminant(&value);
+
+                            if first_value_discriminant != new_value_discriminant {
+                                return Err(ParserError::MixedTypesInArray {
+                                    context: self.source_context_empty(),
+                                });
+                            }
+                        }
+
                         values.push(value);
                         node.inputs.insert(
                             target_prop,

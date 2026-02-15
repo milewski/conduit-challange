@@ -27,10 +27,17 @@ macro_rules! impl_from_shared_value_primitive {
     };
 }
 
-impl_from_shared_value_primitive!(String, bool, Vec<u8>);
+impl_from_shared_value_primitive!(String, bool);
 
-impl FromSharedValue for Vec<String> {
+impl<T> FromSharedValue for Vec<T>
+where
+    T: FromSharedValue + Any + Clone + Send + Sync + 'static,
+{
     fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
+        if let Some(values) = value.downcast_ref::<Vec<T>>() {
+            return Ok(values.clone());
+        }
+
         let Some(shared_values) = value.downcast_ref::<Vec<SharedValue>>() else {
             return Err(NodeError::TypeMismatch {
                 field: "result".to_string(),
@@ -40,7 +47,7 @@ impl FromSharedValue for Vec<String> {
 
         let mut values = Vec::with_capacity(shared_values.len());
         for shared_value in shared_values {
-            values.push(String::from_shared_value(shared_value)?);
+            values.push(T::from_shared_value(shared_value)?);
         }
 
         Ok(values)

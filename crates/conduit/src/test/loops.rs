@@ -156,6 +156,21 @@ fn test_for_loop_can_append_to_array_store() {
 }
 
 #[test]
+fn test_append_numeric_values_to_array_store() {
+    let output: Vec<u8> = pipeline! {r#"
+        config _ {
+            items <- [1 2 3]
+        }
+
+        config::items <<- 4
+
+        <- config::items
+    "#};
+
+    assert_eq!(output, vec![1, 2, 3, 4]);
+}
+
+#[test]
 fn test_arrays_can_be_given_from_inputs() {
     let inputs = input! {
         prompts: vec!["Hello", "World"]

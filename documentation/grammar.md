@@ -241,3 +241,38 @@ Ranges can be exclusive or inclusive:
 for index in 0..10 { /* exclusive: 0..9 */ }
 for index in 0..=10 { /* inclusive: 0..10 */ }
 ```
+
+----
+All nodes run in parallel by default. To run nodes sequentially, use a sequence group:
+
+```conduit
+node_a ping <- "https://example.com"
+
+(
+  node_b ping <- "https://example.com"
+  node_c ping <- "https://example.com"
+)
+
+node_d ping <- "https://example.com"
+```
+
+Since these nodes does not have any dependencies between them, they will run in parallel.
+However, `node_b` and `node_c` are wrapped in a sequence group, so they will run sequentially.
+
+
+--- 
+
+User can also append data to array using `<<-` example:
+
+```conduit
+config _ {
+  items <- [1 2 3]
+}
+
+config::items <<- 4
+
+<- config::items
+```
+
+this will output `[1 2 3 4]` since `<<-` appends to the existing array instead.
+
