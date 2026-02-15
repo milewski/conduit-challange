@@ -11,7 +11,7 @@ pub mod traits;
 
 pub use crate::engine::Engine;
 pub use crate::node::{FromSharedValue, SharedValue};
-pub use conduit_derive::node as functional_node;
+pub use conduit_derive::node as node;
 
 extern crate self as conduit;
 

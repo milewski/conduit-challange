@@ -4,23 +4,6 @@ use syn::{Data, DeriveInput, Fields, ItemFn, parse_macro_input};
 
 // ... existing derives ...
 
-fn extract_ok_type(ty: &syn::Type) -> Option<&syn::Type> {
-    if let syn::Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            if segment.ident == "Result" {
-                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                    if !args.args.is_empty() {
-                        if let syn::GenericArgument::Type(inner) = &args.args[0] {
-                            return Some(inner);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
 fn extract_emitter_event_type(ty: &syn::Type) -> Option<syn::Type> {
     let syn::Type::Path(type_path) = ty else {
         return None;
@@ -40,6 +23,31 @@ fn extract_emitter_event_type(ty: &syn::Type) -> Option<syn::Type> {
     };
 
     Some(event_type.clone())
+}
+
+fn extract_result_types(ty: &syn::Type) -> Option<(&syn::Type, &syn::Type)> {
+    let syn::Type::Path(type_path) = ty else {
+        return None;
+    };
+
+    let last_segment = type_path.path.segments.last()?;
+    if last_segment.ident != "Result" {
+        return None;
+    }
+
+    let syn::PathArguments::AngleBracketed(generic_arguments) = &last_segment.arguments else {
+        return None;
+    };
+
+    let mut generic_arguments = generic_arguments.args.iter();
+    let syn::GenericArgument::Type(ok_type) = generic_arguments.next()? else {
+        return None;
+    };
+    let syn::GenericArgument::Type(error_type) = generic_arguments.next()? else {
+        return None;
+    };
+
+    Some((ok_type, error_type))
 }
 
 fn extract_option_inner_type(ty: &syn::Type) -> Option<&syn::Type> {
@@ -265,23 +273,28 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let body = &input_fn.block;
     let node_event_type = emitter_event_type.unwrap_or_else(|| syn::parse_quote! { () });
 
-    let (output_ty, is_result) = match &input_fn.sig.output {
-        syn::ReturnType::Default => (quote! { () }, false),
+    let (output_ty, result_error_type) = match &input_fn.sig.output {
+        syn::ReturnType::Default => (quote! { () }, None),
         syn::ReturnType::Type(_, ty) => {
-            if let Some(ok_ty) = extract_ok_type(ty) {
-                (quote! { #ok_ty }, true)
+            if let Some((ok_type, error_type)) = extract_result_types(ty) {
+                (quote! { #ok_type }, Some(quote! { #error_type }))
             } else {
-                (quote! { #ty }, false)
+                (quote! { #ty }, None)
             }
         }
     };
 
-    let run_impl = if is_result {
+    let run_impl = if let Some(error_type) = result_error_type {
         quote! {
-            func(#(#args_destructure),*).await.map_err(|error| conduit::node::NodeError::from(error.to_string()))
+            let result: Result<#output_ty, #error_type> = {
+                let func = |#(#function_inputs),*| async move #body;
+                func(#(#args_destructure),*).await
+            };
+            result.map_err(|error| conduit::node::NodeError::from(error.to_string()))
         }
     } else {
         quote! {
+            let func = |#(#function_inputs),*| async move #body;
             Ok(func(#(#args_destructure),*).await)
         }
     };
@@ -320,7 +333,6 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 input: Self::Input,
                 emitter: conduit::traits::Emitter<Self::Event>,
             ) -> Result<Self::Output, conduit::node::NodeError> {
-                let func = |#(#function_inputs),*| async move #body;
                 #run_impl
             }
         }

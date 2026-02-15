@@ -15,5 +15,5 @@ async fn resizer(#[input] source: Vec<u8>, width: u32, height: u32) -> Result<Ve
         .write_to(&mut cursor, image::ImageFormat::Png)
         .map_err(|error| NodeError::Custom(error.to_string()))?;
 
-    Ok::<Vec<u8>, NodeError>(buffer)
+    Ok(buffer)
 }

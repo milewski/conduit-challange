@@ -1,25 +1,25 @@
-use crate::functional_node;
+use crate::node;
 use crate::node::NodeError;
 use crate::traits::{Emitter, EventData, ExecutableNode, NodeEvent};
 use async_trait::async_trait;
 use conduit_derive::{Node, NodeInput};
 
-#[functional_node]
+#[node]
 fn multiplier(#[input] a: u32, b: u32) -> u32 {
     a * b
 }
 
-#[functional_node]
+#[node]
 fn subtract(a: u32, b: u32) -> u32 {
     a - b
 }
 
-#[functional_node]
+#[node]
 fn adder(#[input] a: u32, b: u32) -> u32 {
     a + b
 }
 
-#[functional_node]
+#[node]
 async fn sleep(#[input] duration: u64) {
     tokio::time::sleep(tokio::time::Duration::from_millis(duration)).await;
 }
@@ -68,7 +68,7 @@ impl ExecutableNode for Task {
     }
 }
 
-#[functional_node]
+#[node]
 fn echo(#[input] input: u32) -> u32 {
     input
 }

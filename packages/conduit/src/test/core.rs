@@ -1,4 +1,4 @@
-use crate::{functional_node, input, pipeline};
+use crate::{node, input, pipeline};
 use conduit::node::NodeError;
 use conduit::try_pipeline;
 
@@ -126,7 +126,7 @@ fn test_multiple_returns_are_supported_and_is_equivalent_as_returning_tuples() {
 
 #[test]
 fn test_custom_module_can_be_processed() {
-    #[functional_node]
+    #[node]
     fn simple_multiplier(a: u32, b: u32) -> u32 {
         a * b
     }
@@ -169,6 +169,22 @@ fn test_node_macro_supports_optional_input_fields() {
 }
 
 #[test]
+fn test_node_macro_result_ok_infers_error_type_without_turbofish() {
+    #[conduit_derive::node]
+    async fn parse_number(#[input] input: String) -> Result<u32, NodeError> {
+        Ok(input
+            .parse::<u32>()
+            .map_err(|error| NodeError::Custom(error.to_string()))?)
+    }
+
+    let output: u32 = pipeline! {r#"
+        <- parse_number <- "7"
+    "#};
+
+    assert_eq!(output, 7);
+}
+
+#[test]
 fn test_nested_modules() {
     let output: u32 = pipeline! {r#"
         <- multiplier {               # 4 * 2 = 8
@@ -188,7 +204,7 @@ fn test_nested_modules() {
 
 #[test]
 fn test_async_module() {
-    #[functional_node]
+    #[node]
     async fn async_checked_divide(dividend: u32, divisor: u32) -> Result<u32, String> {
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
@@ -211,7 +227,7 @@ fn test_async_module() {
 
 #[test]
 fn test_multiple_nodes_on_a_single_output() {
-    #[functional_node]
+    #[node]
     async fn number() -> u32 {
         5
     }
@@ -250,7 +266,7 @@ fn test_multiple_nodes_on_a_single_output() {
 
 #[test]
 fn test_implicit_input_output_syntax() {
-    #[functional_node]
+    #[node]
     fn simple_math(#[input] value: u32, operand: u32) -> u32 {
         value + operand
     }
@@ -272,12 +288,12 @@ fn test_implicit_input_output_syntax() {
 
 #[test]
 fn test_implicit_output_chaining() {
-    #[functional_node]
+    #[node]
     fn producer() -> u32 {
         10
     }
 
-    #[functional_node]
+    #[node]
     fn consumer(#[input] value: u32) -> u32 {
         value * 2
     }
@@ -292,7 +308,7 @@ fn test_implicit_output_chaining() {
 
 #[test]
 fn test_error_is_thrown_if_property_does_not_exist() {
-    #[functional_node]
+    #[node]
     fn throw_error_on_invalid_property(a: u32) -> u32 {
         a
     }

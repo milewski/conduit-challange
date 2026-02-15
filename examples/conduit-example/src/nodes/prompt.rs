@@ -22,5 +22,5 @@ async fn prompt(#[input] question: String, emitter: Emitter<PromptEvents>) -> Re
 
     emitter.emit(PromptEvents::Answer { value }).await;
 
-    Ok::<(), NodeError>(())
+    Ok(())
 }

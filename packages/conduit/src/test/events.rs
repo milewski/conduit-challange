@@ -1,4 +1,4 @@
-use crate::functional_node;
+use crate::node;
 use crate::pipeline;
 use crate::traits::Emitter;
 use conduit_derive::NodeEvent;
@@ -55,13 +55,13 @@ fn test_event_callback_explicit_input_target() {
 }
 
 #[test]
-fn test_functional_node_can_emit_events() {
+fn test_node_can_emit_events() {
     #[derive(NodeEvent)]
     enum FunctionalEvents {
         Done { value: u32 },
     }
 
-    #[functional_node]
+    #[node]
     async fn functional_task_with_emitter(count: u32, emitter: Emitter<FunctionalEvents>) {
         for _ in 0..count {
             emitter.emit(FunctionalEvents::Done { value: 1 }).await;
@@ -93,7 +93,7 @@ fn test_event_callbacks_execute_while_emitter_is_running() {
         Started,
     }
 
-    #[functional_node]
+    #[node]
     async fn emit_and_wait(emitter: Emitter<StreamingEvent>) -> Result<u32, String> {
         CALLBACK_STARTED_EVENT.store(false, Ordering::SeqCst);
         emitter.emit(StreamingEvent::Started).await;
@@ -108,7 +108,7 @@ fn test_event_callbacks_execute_while_emitter_is_running() {
         Err("event callback did not run before emitter completed".to_string())
     }
 
-    #[functional_node]
+    #[node]
     fn mark_started() {
         CALLBACK_STARTED_EVENT.store(true, Ordering::SeqCst);
     }
@@ -195,7 +195,7 @@ fn test_parenthesized_nodes_run_sequentially() {
 
 #[test]
 fn test_block_callback_node_does_not_receive_event_payload_implicitly() {
-    #[functional_node]
+    #[node]
     fn as_text(#[input] input: String) -> String {
         input
     }
@@ -228,12 +228,12 @@ fn test_nested_event_payload_aliases_are_captured_correctly() {
         Answer { value: u32 },
     }
 
-    #[functional_node]
+    #[node]
     async fn first_prompt(emitter: Emitter<PromptEvent>) {
         emitter.emit(PromptEvent::Answer { value: 5 }).await;
     }
 
-    #[functional_node]
+    #[node]
     async fn second_prompt(emitter: Emitter<PromptEvent>) {
         emitter.emit(PromptEvent::Answer { value: 8 }).await;
     }
@@ -284,12 +284,12 @@ fn test_callback_block_executes_nested_output_chain() {
 
 #[test]
 fn test_callback_block_executes_input_dependencies_before_node() {
-    #[functional_node]
+    #[node]
     fn produce_value() -> u32 {
         7
     }
 
-    #[functional_node]
+    #[node]
     fn consume_value(#[input] input: u32) -> u32 {
         input
     }
@@ -362,7 +362,7 @@ fn test_event_payload_alias_can_be_interpolated_in_string() {
 
 #[test]
 fn test_callback_block_data_node_executes_inline_node_before_resolution() {
-    #[functional_node]
+    #[node]
     fn convert_to_number(#[input] input: String) -> Result<u32, String> {
         input.parse::<u32>().map_err(|error| error.to_string())
     }
