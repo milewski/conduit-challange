@@ -16,5 +16,69 @@
 
 ## DSL Documentation
 
-For detailed documentation on the DSL syntax and usage, refer to the [DSL Test](./packages/conduit/src/test.rs) file. 
+For detailed documentation on the DSL syntax and usage, refer to the [DSL Test](./packages/conduit/src/test) folder. 
 This file contains comprehensive examples and explanations of the DSL's features and conventions.
+
+## Code Style
+
+- Avoid the use of else statements when possible. Instead, use early returns to simplify code and reduce nesting.
+- Use new lines to separate logical sections of code for better readability. Example:
+
+  Bad: 
+  ```
+  let value_a = 1;
+  let value_b = 2;
+  some_function(value_a, value_b);
+  ```
+  
+  Good:
+  ```
+  let value_a = 1;
+  let value_b = 2;
+  
+  some_function(value_a, value_b);
+  ```
+  > Note the blank line between the variable declarations and the function call, which enhances readability.
+  
+  Another example of good formatting:
+  ```
+  let mut pairs = pair.into_inner();
+  
+  let (identifier_pair, related_property) = (
+      pairs.next().unwrap_or_else(|| unreachable!()),
+      pairs.next().unwrap_or_else(|| unreachable!()),
+  );
+  
+  assert_eq!(identifier_pair.as_rule(), Rule::identifier);
+  assert_eq!(related_property.as_rule(), Rule::property);
+  
+  let identifier_str = identifier_pair.as_str();
+  let identifier = self
+      .aliases
+      .get(identifier_str)
+      .cloned()
+      .unwrap_or_else(|| identifier_str.to_string());
+  
+  Ok(Value::Relation {
+      direction,
+      identifier,
+      property: related_property.as_str().to_string(),
+  })
+  ```
+  > Note the symmetry / logical grouping of code blocks, which enhances readability and maintainability.
+  
+- Always add new lines between blocks, example:
+  Bad:
+  ```
+  if true {}
+  if true {}
+  return Ok(());
+  ```
+  Good:
+  ```
+  if true {}
+
+  if true {}
+  
+  return Ok(());
+  ```

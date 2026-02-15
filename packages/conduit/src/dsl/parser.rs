@@ -378,6 +378,7 @@ impl Visitor {
 
     fn visit_event_handler(&mut self, node: &mut NodeInstruct, event_handler: Pair<Rule>) -> Result<(), ParserError> {
         assert_eq!(event_handler.as_rule(), Rule::event_handler);
+
         let mut pairs = event_handler.into_inner();
         let event_names_pair = pairs.next().unwrap_or_else(|| unreachable!());
         let event_names: Vec<String> = match event_names_pair.as_rule() {
@@ -478,6 +479,7 @@ impl Visitor {
 
     pub fn visit_for_loop(&mut self, pair: Pair<Rule>) -> Result<(), ParserError> {
         assert_eq!(pair.as_rule(), Rule::for_loop);
+
         let mut pairs = pair.into_inner();
 
         let identifier = pairs.next().unwrap().as_str().to_string();
@@ -752,6 +754,7 @@ impl Visitor {
         let value = self.visit_value(inner, direction)?;
 
         node.inputs.insert(property, value);
+
         Ok(())
     }
 
@@ -891,10 +894,11 @@ impl Visitor {
                     _ => Err(ParserError::NonConstantExpression),
                 }
             })
-            .map_infix(|left, op, right| {
+            .map_infix(|left, operation, right| {
                 let left = left?;
                 let right = right?;
-                match op.as_rule() {
+
+                match operation.as_rule() {
                     Rule::add => Ok(left + right),
                     Rule::subtract => Ok(left - right),
                     Rule::multiply => Ok(left * right),
@@ -920,13 +924,13 @@ impl Visitor {
 
     fn evaluate_identifier_constant(&self, pair: Pair<Rule>) -> Result<i32, ParserError> {
         let name = pair.as_str();
-        // Check scope (loop variables)
-        if let Some(val) = self.scope.get(name) {
-            return self.value_to_int(val);
+
+        if let Some(value) = self.scope.get(name) {
+            return self.value_to_int(value);
         }
-        // Check inputs
-        if let Some(Some(val)) = self.inputs.get(name) {
-            return self.value_to_int(val);
+
+        if let Some(Some(value)) = self.inputs.get(name) {
+            return self.value_to_int(value);
         }
 
         Err(ParserError::ConstantNotFound(name.to_string()))
@@ -937,11 +941,15 @@ impl Visitor {
         let identifier = pairs.next().unwrap().as_str();
         let property = pairs.next().unwrap().as_str();
 
-        let resolved_id = self.aliases.get(identifier).map(|s| s.as_str()).unwrap_or(identifier);
+        let resolved_id = self
+            .aliases
+            .get(identifier)
+            .map(|alias| alias.as_str())
+            .unwrap_or(identifier);
 
         if let Some(node) = self.nodes.get(resolved_id) {
-            if let Some(val) = node.inputs.get(property) {
-                return self.value_to_int(val);
+            if let Some(value) = node.inputs.get(property) {
+                return self.value_to_int(value);
             }
         }
 
@@ -962,6 +970,7 @@ impl Visitor {
         for value_pair in pair.into_inner() {
             let inner = value_pair.into_inner().next().unwrap_or_else(|| unreachable!());
             let value = self.visit_value(inner, direction)?;
+
             self.append_pipeline_result_value(value, direction);
         }
 
@@ -1206,6 +1215,7 @@ impl Visitor {
                 if identifier == EVENT_PAYLOAD_IDENTIFIER {
                     return;
                 }
+
                 if identifier.starts_with(EVENT_ALIAS_IDENTIFIER_PREFIX) {
                     return;
                 }
@@ -1245,12 +1255,14 @@ impl Visitor {
                     if related.inputs.contains_key(&target_prop) {
                         continue;
                     }
+
                     related.inputs.insert(target_prop, relation);
                 }
                 None => {
                     if self.inputs.contains_key(&target_id) {
                         continue;
                     }
+
                     return Err(ParserError::ModuleNotDefined { identifier: target_id });
                 }
             }
