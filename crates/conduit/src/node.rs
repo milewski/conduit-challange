@@ -208,6 +208,12 @@ impl FromSharedValue for () {
     }
 }
 
+impl FromSharedValue for SharedValue {
+    fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
+        Ok(value.clone())
+    }
+}
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum NodeError {
     #[error("missing input field: {0}")]

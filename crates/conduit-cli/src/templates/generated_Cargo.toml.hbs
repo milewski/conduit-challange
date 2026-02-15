@@ -1,0 +1,21 @@
+[package]
+name = "generated_conduit_workflow"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[[bin]]
+name = "generated_conduit_workflow"
+path = "src/main.rs"
+
+[dependencies]
+conduit = { path = "{{conduit_crate_path}}" }
+{{nodes_crate_name}} = { package = "{{nodes_package_name}}", path = "{{nodes_crate_path}}" }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

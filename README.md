@@ -60,6 +60,23 @@ fn main() {
 }
 ```
 
+## Compile a `.conduit` workflow into an executable
+
+This repository now includes a CLI compiler binary (`conduit`) that turns a workflow file into a standalone executable.
+
+```bash
+cargo run -p conduit-cli -- ./workflow.conduit --output ./workflow-runner
+./workflow-runner --width 512 --height 256 --source ./example.png --destination ./resized.png
+```
+
+Node provisioning is compile-time and explicit:
+- `--nodes-package-name`: Cargo package name that contains your nodes
+- `--nodes-crate-name`: Rust crate import name for that package
+- `--nodes-crate-path`: local path to that package
+- `--nodes-use`: module path imported to force node registration (for example `my_nodes::nodes::*`)
+
+This matches Conduit's `inventory`-based registration and keeps generated executables self-contained.
+
 ## Basic Syntax
 
 A node in Conduit is defined using the following syntax:

@@ -20,7 +20,6 @@ fn main() {
         source_image read_file <- source
 
         for size in [ 128 256 512 ] {
-
             path _ {
                <- "{ prefix }.{ size }.png"
             }

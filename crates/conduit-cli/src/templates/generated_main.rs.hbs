@@ -1,0 +1,228 @@
+use conduit::dsl::parser::{NodeParser, Value};
+use conduit::traits::DynamicInput;
+use conduit::{Engine, SharedValue};
+use std::collections::HashMap;
+use std::env;
+use std::ops::{Range, RangeInclusive};
+use std::sync::Arc;
+
+#[allow(unused_imports)]
+use {{nodes_use_path}};
+
+fn main() {
+    let workflow: &str = {{workflow_literal}};
+
+    let runtime_inputs = match parse_runtime_inputs(workflow) {
+        Ok(input_values) => input_values,
+        Err(message) => {
+            eprintln!("{message}");
+            std::process::exit(1);
+        }
+    };
+
+    let mut engine = Engine::new();
+    let output = engine.run_pipeline_blocking::<_, SharedValue>(workflow, DynamicInput(runtime_inputs));
+
+    match output {
+        Ok(value) => println!("{}", format_shared_value(&value)),
+        Err(error) => {
+            eprintln!("Workflow execution failed: {error}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn parse_runtime_inputs(workflow: &str) -> Result<Vec<(&'static str, SharedValue)>, String> {
+    let parsed_workflow = NodeParser::parse(workflow).map_err(|error| format!("Invalid workflow: {error}"))?;
+    let provided_arguments = parse_flag_pairs()?;
+    let mut consumed_arguments: HashMap<String, String> = HashMap::new();
+
+    for (input_name, default_value) in &parsed_workflow.inputs {
+        if let Some(argument_value) = provided_arguments.get(input_name) {
+            consumed_arguments.insert(input_name.clone(), argument_value.clone());
+            continue;
+        }
+
+        if default_value.is_none() {
+            return Err(format!("Missing required workflow input '--{input_name}'."));
+        }
+    }
+
+    if consumed_arguments.len() != provided_arguments.len() {
+        let unknown_inputs: Vec<String> = provided_arguments
+            .keys()
+            .filter(|argument_name| !parsed_workflow.inputs.contains_key(*argument_name))
+            .cloned()
+            .collect();
+
+        return Err(format!("Unknown workflow inputs: {}", unknown_inputs.join(", ")));
+    }
+
+    let mut runtime_inputs = Vec::new();
+
+    for (input_name, input_value) in consumed_arguments {
+        let expected_value = parsed_workflow
+            .inputs
+            .get(&input_name)
+            .and_then(|value| value.as_ref());
+        let shared_value = parse_argument_value(&input_value, expected_value)?;
+        let static_input_name: &'static str = Box::leak(input_name.into_boxed_str());
+
+        runtime_inputs.push((static_input_name, shared_value));
+    }
+
+    Ok(runtime_inputs)
+}
+
+fn parse_flag_pairs() -> Result<HashMap<String, String>, String> {
+    let mut arguments = env::args().skip(1);
+    let mut parsed_arguments = HashMap::new();
+
+    while let Some(argument_name) = arguments.next() {
+        if argument_name == "--help" {
+            print_runtime_usage();
+            std::process::exit(0);
+        }
+
+        if !argument_name.starts_with("--") {
+            return Err(format!(
+                "Unexpected argument '{argument_name}'. Expected '--<name> <value>' pairs."
+            ));
+        }
+
+        let Some(argument_value) = arguments.next() else {
+            return Err(format!("Argument '{argument_name}' is missing a value."));
+        };
+
+        parsed_arguments.insert(argument_name.trim_start_matches("--").to_string(), argument_value);
+    }
+
+    Ok(parsed_arguments)
+}
+
+fn parse_argument_value(argument_value: &str, expected_value: Option<&Value>) -> Result<SharedValue, String> {
+    if let Some(Value::Boolean { .. }) = expected_value {
+        return argument_value
+            .parse::<bool>()
+            .map(|value| Arc::new(value) as SharedValue)
+            .map_err(|error| format!("Invalid boolean '{argument_value}': {error}"));
+    }
+
+    if let Some(Value::Numeric { .. } | Value::Expression { .. }) = expected_value {
+        if let Ok(value) = argument_value.parse::<i128>() {
+            return Ok(Arc::new(value) as SharedValue);
+        }
+
+        return argument_value
+            .parse::<f64>()
+            .map(|value| Arc::new(value) as SharedValue)
+            .map_err(|error| format!("Invalid numeric input '{argument_value}': {error}"));
+    }
+
+    if let Some(Value::Range { .. } | Value::Tuple { .. }) = expected_value {
+        return Ok(Arc::new(argument_value.to_string()) as SharedValue);
+    }
+
+    if let Ok(value) = argument_value.parse::<bool>() {
+        return Ok(Arc::new(value) as SharedValue);
+    }
+
+    if let Ok(value) = argument_value.parse::<i128>() {
+        return Ok(Arc::new(value) as SharedValue);
+    }
+
+    if let Ok(value) = argument_value.parse::<f64>() {
+        return Ok(Arc::new(value) as SharedValue);
+    }
+
+    Ok(Arc::new(argument_value.to_string()) as SharedValue)
+}
+
+fn format_shared_value(shared_value: &SharedValue) -> String {
+    if let Some(value) = shared_value.downcast_ref::<String>() {
+        return value.clone();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<bool>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<i128>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<f64>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<u8>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<u16>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<u32>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<u64>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<usize>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<i8>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<i16>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<i32>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<i64>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<isize>() {
+        return value.to_string();
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<f32>() {
+        return value.to_string();
+    }
+
+    if let Some(values) = shared_value.downcast_ref::<Vec<SharedValue>>() {
+        let rendered_values: Vec<String> = values.iter().map(format_shared_value).collect();
+        return format!("[{}]", rendered_values.join(", "));
+    }
+
+    if let Some(values) = shared_value.downcast_ref::<Vec<String>>() {
+        return format!("[{}]", values.join(", "));
+    }
+
+    if let Some(values) = shared_value.downcast_ref::<Vec<u8>>() {
+        return format!("{values:?}");
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<Range<i32>>() {
+        return format!("{}..{}", value.start, value.end);
+    }
+
+    if let Some(value) = shared_value.downcast_ref::<RangeInclusive<i32>>() {
+        return format!("{}..={}", value.start(), value.end());
+    }
+
+    "<unprintable output type>".to_string()
+}
+
+fn print_runtime_usage() {
+    println!("Usage: ./generated_conduit_workflow --<input-name> <value> [--<input-name> <value> ...]");
+}
