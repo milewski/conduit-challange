@@ -86,7 +86,7 @@ impl Engine {
             event_handlers,
             event_callback_nodes: _,
             sequential_edges,
-        } = NodeParser::parse(workflow).map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?;
+        } = NodeParser::parse(workflow).map_err(|error| crate::node::NodeError::ParseError(format!("{}", error)))?;
 
         let (graph, _) = build_dependency_graph(&nodes, &event_handlers, &sequential_edges);
 
@@ -170,10 +170,10 @@ impl Engine {
             event_callback_nodes,
             sequential_edges,
         } = NodeParser::new(workflow)
-            .map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?
+            .map_err(|error| crate::node::NodeError::ParseError(format!("{}", error)))?
             .with_inputs(runtime_inputs.clone())
             .evaluate()
-            .map_err(|error| crate::node::NodeError::ParseError(format!("{:?}", error)))?;
+            .map_err(|error| crate::node::NodeError::ParseError(format!("{}", error)))?;
 
         // Create nodes for inputs
         let mut input_names = std::collections::HashSet::new();

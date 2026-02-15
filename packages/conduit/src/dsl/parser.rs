@@ -1,4 +1,4 @@
-use crate::dsl::error::ParserError;
+use crate::dsl::error::{ParserError, SourceContext};
 use crate::node::SharedValue;
 use pest::Parser;
 use pest::iterators::{Pair, Pairs};
@@ -184,6 +184,7 @@ struct Visitor {
     scope: HashMap<Identifier, Value>,
     aliases: HashMap<Identifier, Identifier>,
     suffix: String,
+    source: String,
 }
 
 fn expression_parser() -> PrattParser<Rule> {
@@ -194,6 +195,17 @@ fn expression_parser() -> PrattParser<Rule> {
 }
 
 impl Visitor {
+    fn source_context_from_pair(&self, pair: &Pair<Rule>) -> SourceContext {
+        let span = pair.as_span();
+        let (line, column) = span.start_pos().line_col();
+
+        SourceContext::new(&self.source, line, column)
+    }
+
+    fn source_context_empty(&self) -> SourceContext {
+        SourceContext::from_source(&self.source)
+    }
+
     fn visit_sequence_group(&mut self, sequence_group: Pair<Rule>) -> Result<(), ParserError> {
         assert_eq!(sequence_group.as_rule(), Rule::sequence_group);
 
@@ -232,6 +244,7 @@ impl Visitor {
         if self.nodes.contains_key(&callback_node.identifier) {
             return Err(ParserError::DuplicatedNode {
                 identifier: callback_node.identifier,
+                context: self.source_context_empty(),
             });
         }
 
@@ -518,8 +531,18 @@ impl Visitor {
 
                 match value {
                     Some(Value::Tuple { values, .. }) => values,
-                    Some(_) => return Err(ParserError::ConstantNotFound(format!("{} is not an array", name))),
-                    None => return Err(ParserError::ConstantNotFound(name.to_string())),
+                    Some(_) => {
+                        return Err(ParserError::ConstantNotFound {
+                            name: format!("{} is not an array", name),
+                            context: self.source_context_empty(),
+                        });
+                    }
+                    None => {
+                        return Err(ParserError::ConstantNotFound {
+                            name: name.to_string(),
+                            context: self.source_context_empty(),
+                        });
+                    }
                 }
             }
             Rule::relation => {
@@ -538,12 +561,17 @@ impl Visitor {
                 match value {
                     Some(Value::Tuple { values, .. }) => values,
                     Some(_) => {
-                        return Err(ParserError::ConstantNotFound(format!(
-                            "{}::{} is not an array",
-                            id_str, prop_str
-                        )));
+                        return Err(ParserError::ConstantNotFound {
+                            name: format!("{}::{} is not an array", id_str, prop_str),
+                            context: self.source_context_empty(),
+                        });
                     }
-                    None => return Err(ParserError::ConstantNotFound(format!("{}::{}", id_str, prop_str))),
+                    None => {
+                        return Err(ParserError::ConstantNotFound {
+                            name: format!("{}::{}", id_str, prop_str),
+                            context: self.source_context_empty(),
+                        });
+                    }
                 }
             }
             Rule::array => {
@@ -636,6 +664,7 @@ impl Visitor {
                 .get(resolved_id)
                 .ok_or_else(|| ParserError::ModuleNotDefined {
                     identifier: resolved_id.to_string(),
+                    context: self.source_context_empty(),
                 })?;
 
             let original_module = original_node.module.clone();
@@ -673,6 +702,7 @@ impl Visitor {
         if !is_assignment && self.nodes.contains_key(&node.identifier) {
             return Err(ParserError::DuplicatedNode {
                 identifier: node.identifier,
+                context: self.source_context_empty(),
             });
         }
 
@@ -696,6 +726,7 @@ impl Visitor {
                                 return Err(ParserError::AppendToNonArray {
                                     identifier: module_identifier.as_str().to_string(),
                                     property: target_prop,
+                                    context: self.source_context_empty(),
                                 });
                             }
                             None => Vec::new(),
@@ -856,7 +887,10 @@ impl Visitor {
             };
 
             if self.inputs.contains_key(&input_name) {
-                return Err(ParserError::DuplicatedNode { identifier: input_name });
+                return Err(ParserError::DuplicatedNode {
+                    identifier: input_name,
+                    context: self.source_context_empty(),
+                });
             }
             self.inputs.insert(input_name, resolved_value);
         }
@@ -867,11 +901,17 @@ impl Visitor {
     fn resolve_range_bound(&self, pair: Pair<Rule>) -> Result<i32, ParserError> {
         let inner = pair.into_inner().next().unwrap();
         match inner.as_rule() {
-            Rule::number => inner.as_str().parse().map_err(|_| ParserError::InvalidNumber),
+            Rule::number => inner.as_str().parse().map_err(|_| ParserError::InvalidNumber {
+                context: self.source_context_empty(),
+            }),
             Rule::interpolation => {
                 let content = inner.into_inner().next().unwrap().as_str();
-                let mut pairs =
-                    Schema::parse(Rule::interpolation_expression, content).map_err(|e| ParserError::from(e))?;
+                let mut pairs = Schema::parse(Rule::interpolation_expression, content).map_err(|error| {
+                    ParserError::SyntaxError {
+                        source: error,
+                        raw_source: Some(self.source.clone()),
+                    }
+                })?;
                 let expr_pair = pairs.next().unwrap().into_inner().next().unwrap();
                 self.evaluate_expression_constant(expr_pair)
             }
@@ -883,15 +923,20 @@ impl Visitor {
 
     fn evaluate_expression_constant(&self, pair: Pair<Rule>) -> Result<i32, ParserError> {
         let pairs = pair.into_inner();
+        let source = self.source.clone();
 
         expression_parser()
             .map_primary(|primary| -> Result<i32, ParserError> {
                 match primary.as_rule() {
-                    Rule::number => primary.as_str().parse().map_err(|_| ParserError::InvalidNumber),
+                    Rule::number => primary.as_str().parse().map_err(|_| ParserError::InvalidNumber {
+                        context: SourceContext::from_source(&source),
+                    }),
                     Rule::identifier => self.evaluate_identifier_constant(primary),
                     Rule::relation => self.evaluate_relation_constant(primary),
                     Rule::expression => self.evaluate_expression_constant(primary),
-                    _ => Err(ParserError::NonConstantExpression),
+                    _ => Err(ParserError::NonConstantExpression {
+                        context: SourceContext::from_source(&source),
+                    }),
                 }
             })
             .map_infix(|left, operation, right| {
@@ -904,14 +949,18 @@ impl Visitor {
                     Rule::multiply => Ok(left * right),
                     Rule::divide => {
                         if right == 0 {
-                            Err(ParserError::DivisionByZero)
+                            Err(ParserError::DivisionByZero {
+                                context: SourceContext::from_source(&source),
+                            })
                         } else {
                             Ok(left / right)
                         }
                     }
                     Rule::power => {
                         if right < 0 {
-                            Err(ParserError::NegativeExponent)
+                            Err(ParserError::NegativeExponent {
+                                context: SourceContext::from_source(&source),
+                            })
                         } else {
                             Ok(left.pow(right as u32))
                         }
@@ -933,7 +982,10 @@ impl Visitor {
             return self.value_to_int(value);
         }
 
-        Err(ParserError::ConstantNotFound(name.to_string()))
+        Err(ParserError::ConstantNotFound {
+            name: name.to_string(),
+            context: self.source_context_empty(),
+        })
     }
 
     fn evaluate_relation_constant(&self, pair: Pair<Rule>) -> Result<i32, ParserError> {
@@ -953,13 +1005,20 @@ impl Visitor {
             }
         }
 
-        Err(ParserError::ConstantNotFound(format!("{}::{}", identifier, property)))
+        Err(ParserError::ConstantNotFound {
+            name: format!("{}::{}", identifier, property),
+            context: self.source_context_empty(),
+        })
     }
 
     fn value_to_int(&self, value: &Value) -> Result<i32, ParserError> {
         match value {
-            Value::Numeric { value, .. } => value.parse().map_err(|_| ParserError::InvalidNumber),
-            _ => Err(ParserError::NonNumericValue),
+            Value::Numeric { value, .. } => value.parse().map_err(|_| ParserError::InvalidNumber {
+                context: self.source_context_empty(),
+            }),
+            _ => Err(ParserError::NonNumericValue {
+                context: self.source_context_empty(),
+            }),
         }
     }
 
@@ -1029,8 +1088,13 @@ impl Visitor {
                             let inner_pair = inner.into_inner().next().unwrap();
                             let inner_str = inner_pair.as_str();
 
-                            let mut pairs = Schema::parse(Rule::interpolation_expression, inner_str)
-                                .map_err(|e| ParserError::from(e))?;
+                            let mut pairs =
+                                Schema::parse(Rule::interpolation_expression, inner_str).map_err(|error| {
+                                    ParserError::SyntaxError {
+                                        source: error,
+                                        raw_source: Some(self.source.clone()),
+                                    }
+                                })?;
 
                             let expression_pair = pairs.next().unwrap().into_inner().next().unwrap();
                             let expression = self.visit_expression(expression_pair.into_inner())?;
@@ -1112,7 +1176,9 @@ impl Visitor {
                     let first_discriminant = std::mem::discriminant(first);
                     for value in &values {
                         if std::mem::discriminant(value) != first_discriminant {
-                            return Err(ParserError::MixedTypesInArray);
+                            return Err(ParserError::MixedTypesInArray {
+                                context: self.source_context_empty(),
+                            });
                         }
                     }
                 }
@@ -1263,7 +1329,10 @@ impl Visitor {
                         continue;
                     }
 
-                    return Err(ParserError::ModuleNotDefined { identifier: target_id });
+                    return Err(ParserError::ModuleNotDefined {
+                        identifier: target_id,
+                        context: self.source_context_empty(),
+                    });
                 }
             }
         }
@@ -1282,9 +1351,17 @@ pub struct NodeParser<'a> {
 
 impl<'a> NodeParser<'a> {
     pub fn new(source: &'a str) -> Result<Self, ParserError> {
+        let parsed = Schema::parse(Rule::nodes, source).map_err(|error| ParserError::SyntaxError {
+            raw_source: Some(source.to_string()),
+            source: error,
+        })?;
+
+        let mut visitor = Visitor::default();
+        visitor.source = source.to_string();
+
         Ok(NodeParser {
-            visitor: Visitor::default(),
-            inner: Schema::parse(Rule::nodes, source)?.next(),
+            visitor,
+            inner: parsed.into_iter().next(),
         })
     }
 
