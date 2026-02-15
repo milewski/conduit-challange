@@ -20,3 +20,6 @@ name = "resize_image"
 
 [[example]]
 name = "events"
+
+[[example]]
+name = "for_loop"

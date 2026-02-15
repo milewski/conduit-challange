@@ -1,9 +1,5 @@
 # This workflow resize an image based on the given width / height provided
--> source
--> destination
--> width
--> height
-
+-> source, destination, width, height
 
 <- resizer {
     <- read_file <- source

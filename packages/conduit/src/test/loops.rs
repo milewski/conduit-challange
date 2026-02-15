@@ -98,6 +98,23 @@ fn test_passing_array_as_input() {
 }
 
 #[test]
+fn test_for_loop_can_iterate_inline_array_literal() {
+    let output: u32 = pipeline! {r#"
+        store _ {
+            total <- 0
+        }
+
+        for size in [128 256 512] {
+            store::total <- (store::total + size)
+        }
+
+        <- store::total
+    "#};
+
+    assert_eq!(output, 896);
+}
+
+#[test]
 fn test_arrays_can_be_given_from_inputs() {
     let inputs = input! {
         prompts: vec!["Hello", "World"]

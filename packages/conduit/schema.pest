@@ -1,9 +1,10 @@
 nodes = { SOI ~ NEWLINE* ~ ((input_def | pipeline_result | for_loop | sequence_group | anonymous_node | node) ~ NEWLINE*)* ~ EOI }
-input_def = { "->" ~ identifier ~ ("<-" ~ value)? }
-pipeline_result = { "<-" ~ value }
+input_def = { "->" ~ input_identifiers ~ ("<-" ~ value)? }
+input_identifiers = { identifier ~ ("," ~ identifier)* }
+pipeline_result = { "<-" ~ value ~ ("," ~ value)* }
 
 for_loop = { "for" ~ identifier ~ "in" ~ iterable ~ loop_body }
-iterable = { range | relation | identifier }
+iterable = { range | relation | identifier | array }
 loop_body = { "{" ~ NEWLINE* ~ (node | anonymous_node | for_loop | sequence_group | NEWLINE)* ~ "}" }
 sequence_group = { "(" ~ NEWLINE* ~ ((node | anonymous_node) ~ NEWLINE*)+ ~ ")" }
 range = { range_bound ~ ".." ~ range_bound }

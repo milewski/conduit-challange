@@ -8,7 +8,7 @@ prompt {
                     name <- name
                     age <- string_to_number {
                         <- age
-                        error_message <- "invalid age, please age should be a number but received: { age }"
+                        error_message <- "Invalid value for `age`: expected a number, got `{age}`."
                     }
                 }
             }
@@ -16,5 +16,4 @@ prompt {
     }
 }
 
-<- output::name
-<- output::age
+<- output::name, output::age

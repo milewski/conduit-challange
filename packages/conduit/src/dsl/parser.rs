@@ -529,6 +529,13 @@ impl Visitor {
                     None => return Err(ParserError::ConstantNotFound(format!("{}::{}", id_str, prop_str))),
                 }
             }
+            Rule::array => {
+                let mut values = Vec::new();
+                for value_pair in inner_iterable.into_inner() {
+                    values.push(self.visit_value(value_pair, Direction::Input)?);
+                }
+                values
+            }
             _ => unreachable!(),
         };
 
@@ -797,26 +804,40 @@ impl Visitor {
 
     pub fn visit_input_def(&mut self, pair: Pair<Rule>) -> Result<(), ParserError> {
         assert_eq!(pair.as_rule(), Rule::input_def);
-        let mut pairs = pair.into_inner();
+        let mut input_names = Vec::new();
+        let mut optional_value: Option<Value> = None;
 
-        let identifier = pairs.next().unwrap_or_else(|| unreachable!());
-        assert_eq!(identifier.as_rule(), Rule::identifier);
-        let name = identifier.as_str().to_string();
-
-        let value = if let Some(val_pair) = pairs.next() {
-            // Check if there is a value provided
-            let inner = val_pair.into_inner().next().unwrap_or_else(|| unreachable!());
-            Some(self.visit_value(inner, Direction::Input)?)
-        } else if let Some(external_val) = self.external_inputs.get(&name) {
-            convert_shared_value_to_parser_value(external_val)
-        } else {
-            None
-        };
-
-        if self.inputs.contains_key(&name) {
-            return Err(ParserError::DuplicatedNode { identifier: name });
+        for input_def_part in pair.into_inner() {
+            match input_def_part.as_rule() {
+                Rule::input_identifiers => {
+                    for identifier_pair in input_def_part.into_inner() {
+                        assert_eq!(identifier_pair.as_rule(), Rule::identifier);
+                        input_names.push(identifier_pair.as_str().to_string());
+                    }
+                }
+                Rule::value => {
+                    let inner_value = input_def_part.into_inner().next().unwrap_or_else(|| unreachable!());
+                    optional_value = Some(self.visit_value(inner_value, Direction::Input)?);
+                }
+                _ => unreachable!(),
+            }
         }
-        self.inputs.insert(name, value);
+
+        for input_name in input_names {
+            let resolved_value = if let Some(value) = &optional_value {
+                Some(value.clone())
+            } else if let Some(external_value) = self.external_inputs.get(&input_name) {
+                convert_shared_value_to_parser_value(external_value)
+            } else {
+                None
+            };
+
+            if self.inputs.contains_key(&input_name) {
+                return Err(ParserError::DuplicatedNode { identifier: input_name });
+            }
+            self.inputs.insert(input_name, resolved_value);
+        }
+
         Ok(())
     }
 
@@ -916,16 +937,18 @@ impl Visitor {
 
     pub fn visit_pipeline_result(&mut self, pair: Pair<Rule>) -> Result<(), ParserError> {
         assert_eq!(pair.as_rule(), Rule::pipeline_result);
-
-        let value_pair = pair.into_inner().next().unwrap_or_else(|| unreachable!());
-        let inner = value_pair.into_inner().next().unwrap_or_else(|| unreachable!());
         let direction = Direction::Input;
-        let value = self.visit_value(inner, direction)?;
 
-        // If the result value is a Relation, it might point to an alias.
-        // visit_value should have already resolved it.
-        // But double check if we need special handling for pipeline result.
+        for value_pair in pair.into_inner() {
+            let inner = value_pair.into_inner().next().unwrap_or_else(|| unreachable!());
+            let value = self.visit_value(inner, direction)?;
+            self.append_pipeline_result_value(value, direction);
+        }
 
+        Ok(())
+    }
+
+    fn append_pipeline_result_value(&mut self, value: Value, direction: Direction) {
         if let Some(node) = self.nodes.get_mut(PIPELINE_RESULT_ID) {
             if let Some(existing_value) = node.inputs.get_mut("input") {
                 match existing_value {
@@ -948,8 +971,6 @@ impl Visitor {
             node.inputs.insert("input".to_string(), value);
             self.nodes.insert(PIPELINE_RESULT_ID.to_string(), node);
         }
-
-        Ok(())
     }
 
     fn visit_value(&mut self, pair: Pair<Rule>, direction: Direction) -> Result<Value, ParserError> {
@@ -1482,6 +1503,7 @@ mod tests {
         let input = r#"
             -> width <- 100
             -> height <- 200
+            -> source, destination
             node module {
                 w <- width
                 h <- height
@@ -1490,6 +1512,8 @@ mod tests {
         let workflow = NodeParser::parse(input).expect("Failed to parse");
         assert!(workflow.inputs.contains_key("width"));
         assert!(workflow.inputs.contains_key("height"));
+        assert!(workflow.inputs.contains_key("source"));
+        assert!(workflow.inputs.contains_key("destination"));
 
         let width_val = workflow.inputs.get("width").unwrap();
         // 100 is parsed as Numeric
@@ -1498,6 +1522,30 @@ mod tests {
         } else {
             panic!("Expected Numeric value for width");
         }
+    }
+
+    #[test]
+    fn test_pipeline_result_supports_comma_separated_values() {
+        let workflow = NodeParser::parse(
+            r#"
+            output _ {
+                name <- "Rafael"
+                age <- 20
+            }
+            <- output::name, output::age
+        "#,
+        )
+        .expect("comma separated pipeline result should parse");
+
+        let pipeline_result_node = workflow
+            .nodes
+            .get(PIPELINE_RESULT_ID)
+            .expect("pipeline result node should exist");
+        let Some(Value::Tuple { values, .. }) = pipeline_result_node.inputs.get("input") else {
+            panic!("pipeline result should be stored as tuple for multiple values");
+        };
+
+        assert_eq!(values.len(), 2);
     }
 
     #[test]

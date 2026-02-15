@@ -1,4 +1,4 @@
-use crate::{node, input, pipeline};
+use crate::{input, node, pipeline};
 use conduit::node::NodeError;
 use conduit::try_pipeline;
 
@@ -88,6 +88,26 @@ fn test_interpolation_expression() {
 }
 
 #[test]
+fn test_pipeline_multiple_input_identifiers_definition() {
+    let input = input! {
+        source: "cover.png",
+        destination: "cover.resized.png",
+        width: 512,
+        height: 256,
+    };
+
+    let output: (String, String, u32, u32) = pipeline! {input, r#"
+        -> source, destination, width, height
+        <- (source, destination, width, height)
+    "#};
+
+    assert_eq!(
+        output,
+        ("cover.png".to_string(), "cover.resized.png".to_string(), 512, 256,)
+    );
+}
+
+#[test]
 fn test_string_literal_value() {
     let output: String = pipeline! {r#"
         <- "just a string"
@@ -122,6 +142,21 @@ fn test_multiple_returns_are_supported_and_is_equivalent_as_returning_tuples() {
     assert_eq!(b, "b");
     assert_eq!(c, "c");
     assert_eq!(d, (2, 3));
+}
+
+#[test]
+fn test_multiple_returns_can_be_declared_in_one_line() {
+    let (name, age): (String, u32) = pipeline! {r#"
+        output _ {
+            name <- "Rafael"
+            age <- 24
+        }
+
+        <- output::name, output::age
+    "#};
+
+    assert_eq!(name, "Rafael");
+    assert_eq!(age, 24);
 }
 
 #[test]
