@@ -2,7 +2,7 @@
 
 This section highlights practical examples included in the repository and explains what they demonstrate.
 
-Image resize example
+# Image resize example
 
 Path: `examples/conduit-example`
 
@@ -16,6 +16,7 @@ DSL snippet:
 
 ```dsl
 source read_file <- "cover.png"
+
 resizer {
   source <- source
   width <- 512
@@ -24,7 +25,7 @@ resizer {
 }
 ```
 
-Arithmetic and store example
+# Arithmetic and store example
 
 Path: `examples/conduit-example/examples/arithmetic.rs`
 

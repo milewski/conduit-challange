@@ -8,32 +8,10 @@ A typical pattern is using the `for` construct with `store` values to iterate an
 
 ```dsl
 store _ { paths <- [] }
-for i in { 0 }..{ 3 } {
-  // generate a path using the loop index
-  path <- "cover.{ i }.png"
-  store::paths <<- path
+
+for index in 0..3 {
+  store::paths <<- "cover.{ index }.png"
 }
 
-// after the loop
 <- store::paths
 ```
-
-Conditionals
-
-Basic conditional execution is supported via `if` blocks that evaluate expressions and conditionally execute nodes.
-
-```dsl
-if { store::count > 10 } {
-  logger <- "count too high"
-}
-```
-
-Events and callbacks
-
-The runtime supports callback nodes and event-driven patterns when integrating with interactive workflows or external inputs. Callbacks are represented as nodes that can create and manage configuration at runtime.
-
-Best practices
-
-- Prefer pure node implementations for deterministic logic.
-- Use `store` to maintain state across iterations and events.
-- Keep loops and conditionals small and testable; if a flow becomes complex, consider moving logic into Rust nodes where you have richer tooling and testing.
