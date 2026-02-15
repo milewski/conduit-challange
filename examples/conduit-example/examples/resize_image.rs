@@ -5,7 +5,6 @@ use example::nodes::*;
 
 /// This example read a file in disk, resize it to the provided width / height and save it to a new destination
 fn main() {
-    let pipeline = include_str!("./workflows/resize_image.conduit");
     let input = input! {
         width: 512,
         height: 512,
@@ -13,7 +12,19 @@ fn main() {
         destination: "./examples/conduit-example/cover.resized.png",
     };
 
-    let output: Result<Vec<u8>, _> = try_pipeline!(input, pipeline);
+    let output: Result<Vec<u8>, _> = try_pipeline! { input, r#"
+        # This workflow resize an image based on the given width / height provided
+        -> source, destination, width, height
+        
+        <- resizer {
+            <- read_file <- source
+            width <- width
+            height <- height
+            -> write_file {
+                destination <- destination
+            }
+        }
+    "# };
 
     match output {
         Ok(image) => println!("Resized images in bytes: {}", image.len()),

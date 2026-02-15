@@ -23,3 +23,6 @@ name = "events"
 
 [[example]]
 name = "for_loop"
+
+[[example]]
+name = "arithmetic"

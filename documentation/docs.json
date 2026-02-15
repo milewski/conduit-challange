@@ -9,7 +9,6 @@
     "pages": [
       "home",
       "expression",
-      "README",
       "grammar",
       "keywords-operators",
       "node-syntax",
