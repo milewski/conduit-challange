@@ -66,6 +66,12 @@ pub enum Value {
         direction: Direction,
         values: Vec<Value>,
     },
+    Range {
+        direction: Direction,
+        start: i32,
+        end: i32,
+        inclusive: bool,
+    },
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
@@ -98,7 +104,8 @@ impl Value {
             | Value::Boolean { direction, .. }
             | Value::Expression { direction, .. }
             | Value::Relation { direction, .. }
-            | Value::Tuple { direction, .. } => *direction,
+            | Value::Tuple { direction, .. }
+            | Value::Range { direction, .. } => *direction,
         }
     }
 }
@@ -503,14 +510,16 @@ impl Visitor {
 
         let values: Vec<Value> = match inner_iterable.as_rule() {
             Rule::range => {
-                let mut range_pairs = inner_iterable.into_inner();
-                let start_pair = range_pairs.next().unwrap();
-                let end_pair = range_pairs.next().unwrap();
+                let (start, end, inclusive) = self.parse_range_parts(inner_iterable)?;
 
-                let start = self.resolve_range_bound(start_pair)?;
-                let end = self.resolve_range_bound(end_pair)?;
+                let iterable_values = if inclusive {
+                    (start..=end).collect::<Vec<i32>>()
+                } else {
+                    (start..end).collect::<Vec<i32>>()
+                };
 
-                (start..end)
+                iterable_values
+                    .into_iter()
                     .map(|index| Value::Numeric {
                         direction: Direction::Input,
                         value: index.to_string(),
@@ -613,6 +622,20 @@ impl Visitor {
         }
 
         Ok(())
+    }
+
+    fn parse_range_parts(&self, pair: Pair<Rule>) -> Result<(i32, i32, bool), ParserError> {
+        let mut range_pairs = pair.into_inner();
+
+        let start_pair = range_pairs.next().unwrap_or_else(|| unreachable!());
+        let operator_pair = range_pairs.next().unwrap_or_else(|| unreachable!());
+        let end_pair = range_pairs.next().unwrap_or_else(|| unreachable!());
+
+        let start = self.resolve_range_bound(start_pair)?;
+        let end = self.resolve_range_bound(end_pair)?;
+        let inclusive = operator_pair.as_str() == "..=";
+
+        Ok((start, end, inclusive))
     }
 
     pub fn visit_node<'a>(
@@ -1073,6 +1096,16 @@ impl Visitor {
                 direction,
                 value: self.visit_expression(pair.into_inner())?,
             }),
+            Rule::range => {
+                let (start, end, inclusive) = self.parse_range_parts(pair)?;
+
+                Ok(Value::Range {
+                    direction,
+                    start,
+                    end,
+                    inclusive,
+                })
+            }
             Rule::number => Ok(Value::Numeric {
                 direction,
                 value: pair.as_str().to_string(),
@@ -1482,6 +1515,50 @@ fn convert_shared_value_to_parser_value(value: &SharedValue) -> Option<Value> {
                         parts: vec![StringPart::Literal(token.to_string())],
                     })
                     .collect(),
+            });
+        }
+    }
+
+    if TypeId::of::<std::ops::Range<i32>>() == value.as_ref().type_id() {
+        if let Some(value) = value.downcast_ref::<std::ops::Range<i32>>() {
+            return Some(Value::Range {
+                direction: Direction::Input,
+                start: value.start,
+                end: value.end,
+                inclusive: false,
+            });
+        }
+    }
+
+    if TypeId::of::<std::ops::RangeInclusive<i32>>() == value.as_ref().type_id() {
+        if let Some(value) = value.downcast_ref::<std::ops::RangeInclusive<i32>>() {
+            return Some(Value::Range {
+                direction: Direction::Input,
+                start: *value.start(),
+                end: *value.end(),
+                inclusive: true,
+            });
+        }
+    }
+
+    if TypeId::of::<std::ops::Range<u32>>() == value.as_ref().type_id() {
+        if let Some(value) = value.downcast_ref::<std::ops::Range<u32>>() {
+            return Some(Value::Range {
+                direction: Direction::Input,
+                start: value.start as i32,
+                end: value.end as i32,
+                inclusive: false,
+            });
+        }
+    }
+
+    if TypeId::of::<std::ops::RangeInclusive<u32>>() == value.as_ref().type_id() {
+        if let Some(value) = value.downcast_ref::<std::ops::RangeInclusive<u32>>() {
+            return Some(Value::Range {
+                direction: Direction::Input,
+                start: *value.start() as i32,
+                end: *value.end() as i32,
+                inclusive: true,
             });
         }
     }

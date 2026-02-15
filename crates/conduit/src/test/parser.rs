@@ -456,3 +456,36 @@ fn test_sequence_group_creates_sequential_edges() {
         ]
     );
 }
+
+#[test]
+fn test_range_values_parse_as_new_value_type() {
+    let workflow = NodeParser::parse(
+        r#"
+        random _ {
+            between <- 0..10
+            inclusive_between <- 0..=10
+        }
+        "#,
+    )
+    .expect("range value should parse");
+
+    let random_node = workflow.nodes.get("random").expect("random node should exist");
+
+    match random_node.inputs.get("between") {
+        Some(Value::Range {
+            start, end, inclusive, ..
+        }) => {
+            assert_eq!((*start, *end, *inclusive), (0, 10, false));
+        }
+        _ => panic!("expected `between` to be parsed as Value::Range"),
+    }
+
+    match random_node.inputs.get("inclusive_between") {
+        Some(Value::Range {
+            start, end, inclusive, ..
+        }) => {
+            assert_eq!((*start, *end, *inclusive), (0, 10, true));
+        }
+        _ => panic!("expected `inclusive_between` to be parsed as Value::Range"),
+    }
+}

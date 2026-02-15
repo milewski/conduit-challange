@@ -353,7 +353,8 @@ fn is_input_direction(value: &Value) -> bool {
         | Value::Boolean { direction, .. }
         | Value::Expression { direction, .. }
         | Value::Relation { direction, .. }
-        | Value::Tuple { direction, .. } => *direction == Direction::Input,
+        | Value::Tuple { direction, .. }
+        | Value::Range { direction, .. } => *direction == Direction::Input,
     }
 }
 
@@ -417,6 +418,15 @@ fn resolve_single_value(
             }
 
             Ok(Arc::new(resolved) as SharedValue)
+        }
+        Value::Range {
+            start, end, inclusive, ..
+        } => {
+            if *inclusive {
+                Ok(Arc::new(*start..=*end) as SharedValue)
+            } else {
+                Ok(Arc::new(*start..*end) as SharedValue)
+            }
         }
     }
 }
@@ -510,6 +520,15 @@ fn resolve_reference(
                 Value::Boolean { value, .. } => Ok(Arc::new(*value)),
                 Value::Expression { value, .. } => {
                     Ok(Arc::new(evaluate_expression(value, outputs, nodes, input_names)?))
+                }
+                Value::Range {
+                    start, end, inclusive, ..
+                } => {
+                    if *inclusive {
+                        Ok(Arc::new(*start..=*end))
+                    } else {
+                        Ok(Arc::new(*start..*end))
+                    }
                 }
                 _ => Err(crate::node::NodeError::ReferenceTypeNotSupported {
                     identifier: identifier.to_string(),

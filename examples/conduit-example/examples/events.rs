@@ -4,7 +4,7 @@ use conduit::pipeline;
 use example::nodes::*;
 
 fn main() {
-    let (name, age): (String, u32) = pipeline!(r#"
+    let (name, age): (String, u32) = pipeline! {r#"
         prompt {
             <- "What is your name?"
             on answer name {
@@ -24,7 +24,7 @@ fn main() {
         }
 
         <- output::name, output::age
-    "#);
+    "# };
 
     println!("Answer: {}, {}", name, age);
 }

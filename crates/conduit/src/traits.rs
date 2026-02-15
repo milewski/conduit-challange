@@ -3,6 +3,7 @@ use crate::registry::Payload;
 use async_trait::async_trait;
 use std::any::Any;
 use std::marker::PhantomData;
+use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
@@ -51,6 +52,8 @@ impl_node_input_single!(Vec<u8>);
 impl_node_input_single!(u32);
 impl_node_input_single!(bool);
 impl_node_input_single!(f64);
+impl_node_input_single!(Range<i32>);
+impl_node_input_single!(RangeInclusive<i32>);
 
 // -- Blanket impls: NodeOutput for common single-value types --
 
@@ -81,6 +84,8 @@ impl_node_output_single!(Vec<u8>);
 impl_node_output_single!(u32);
 impl_node_output_single!(bool);
 impl_node_output_single!(f64);
+impl_node_output_single!(Range<i32>);
+impl_node_output_single!(RangeInclusive<i32>);
 
 // -- Dynamic Input Helper --
 
@@ -140,6 +145,10 @@ impl_as_input_identity!(String);
 impl_as_input_identity!(Vec<u8>);
 impl_as_input_identity!(Vec<String>);
 impl_as_input_identity!(Vec<&'static str>);
+impl_as_input_identity!(Range<i32>);
+impl_as_input_identity!(RangeInclusive<i32>);
+impl_as_input_identity!(Range<u32>);
+impl_as_input_identity!(RangeInclusive<u32>);
 
 #[derive(Clone)]
 pub struct EventData {

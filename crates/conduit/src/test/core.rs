@@ -1,6 +1,7 @@
 use crate::{input, node, pipeline};
 use conduit::node::NodeError;
 use conduit::try_pipeline;
+use std::ops::{Range, RangeInclusive};
 
 #[test]
 fn test_input_output() {
@@ -199,6 +200,46 @@ fn test_custom_module_can_be_processed() {
 }
 
 #[test]
+fn test_node_receives_exclusive_range_value() {
+    #[node]
+    fn range_length(between: Range<u32>) -> u32 {
+        between.end - between.start
+    }
+
+    let output: u32 = pipeline! {r#"
+        random _ {
+            between <- 0..10
+        }
+
+        <- range_length {
+            between <- random::between
+        }
+    "#};
+
+    assert_eq!(output, 10);
+}
+
+#[test]
+fn test_node_receives_inclusive_range_value() {
+    #[node]
+    fn inclusive_range_length(between: RangeInclusive<u32>) -> u32 {
+        between.end() - between.start() + 1
+    }
+
+    let output: u32 = pipeline! {r#"
+        random _ {
+            between <- 0..=10
+        }
+
+        <- inclusive_range_length {
+            between <- random::between
+        }
+    "#};
+
+    assert_eq!(output, 11);
+}
+
+#[test]
 fn test_node_macro_supports_optional_input_fields() {
     #[conduit_derive::node]
     async fn optional_prefix(#[input] input: String, prefix: Option<String>) -> String {
@@ -393,4 +434,55 @@ fn test_properties_can_be_mass_assigned() {
     "#};
 
     assert_eq!(output, (25, 4));
+}
+
+#[test]
+fn test_default_values_can_be_mass_assigned_to_inputs() {
+    let a: (u32, u32, u32) = pipeline! { input! { x: 1, y: 2, z: 3 }, r#"
+        -> x, y, z
+        <- x, y, z
+    "#};
+
+    let b: (u32, u32, u32) = pipeline! { input! { x: 1, z: 3 }, r#"
+        -> x, y, z <- 5
+        <- x, y, z
+    "#};
+
+    assert_eq!(a, (1, 2, 3));
+    assert_eq!(b, (1, 5, 3));
+}
+
+#[test]
+fn test_all_numeric_types_inputs() {
+    let inputs = input! {
+        u8: 1u8,
+        u16: 1u16,
+        u32: 1u32,
+        u64: 1u64,
+        u128: 1u128,
+        usize: 1usize,
+        i8: 1i8,
+        i16: 1i16,
+        i32: 1i32,
+        i64: 1i64,
+        i128: 1i128,
+        isize: 1isize,
+        f32: 1.0f32,
+        f64: 1.0f64
+    };
+
+    let output: (u8, String) = pipeline! {inputs, r#"
+        -> u8 -> u16 -> u32 -> u64 -> u128 -> usize
+        -> i8 -> i16 -> i32 -> i64 -> i128 -> isize
+        -> f32 -> f64
+
+        store _ {
+            value <- (u8 + u16 + u32 + u64 + u128 + usize + i8 + i16 + i32 + i64 + i128 + isize + f32 + f64)
+        }
+
+        <- store::value
+        <- "{ store::value }"
+    "#};
+
+    assert_eq!(output, (14u8, "14".to_string()));
 }

@@ -1,4 +1,5 @@
 use std::any::{Any, type_name};
+use std::ops::{Range, RangeInclusive};
 use std::sync::Arc;
 
 pub type SharedValue = Arc<dyn Any + Send + Sync + 'static>;
@@ -43,6 +44,92 @@ impl FromSharedValue for Vec<String> {
         }
 
         Ok(values)
+    }
+}
+
+impl FromSharedValue for Range<i32> {
+    fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
+        if let Some(range_value) = value.downcast_ref::<Range<i32>>() {
+            return Ok(range_value.clone());
+        }
+
+        if let Some(range_value) = value.downcast_ref::<Range<u32>>() {
+            return Ok((range_value.start as i32)..(range_value.end as i32));
+        }
+
+        Err(NodeError::TypeMismatch {
+            field: "result".to_string(),
+            expected: type_name::<Range<i32>>().to_string(),
+        })
+    }
+}
+
+impl FromSharedValue for RangeInclusive<i32> {
+    fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
+        if let Some(range_value) = value.downcast_ref::<RangeInclusive<i32>>() {
+            return Ok(range_value.clone());
+        }
+
+        if let Some(range_value) = value.downcast_ref::<RangeInclusive<u32>>() {
+            return Ok((*range_value.start() as i32)..=(*range_value.end() as i32));
+        }
+
+        Err(NodeError::TypeMismatch {
+            field: "result".to_string(),
+            expected: type_name::<RangeInclusive<i32>>().to_string(),
+        })
+    }
+}
+
+impl FromSharedValue for Range<u32> {
+    fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
+        if let Some(range_value) = value.downcast_ref::<Range<u32>>() {
+            return Ok(range_value.clone());
+        }
+
+        if let Some(range_value) = value.downcast_ref::<Range<i32>>() {
+            let start = u32::try_from(range_value.start).map_err(|_| NodeError::TypeMismatch {
+                field: "result".to_string(),
+                expected: type_name::<Range<u32>>().to_string(),
+            })?;
+            let end = u32::try_from(range_value.end).map_err(|_| NodeError::TypeMismatch {
+                field: "result".to_string(),
+                expected: type_name::<Range<u32>>().to_string(),
+            })?;
+
+            return Ok(start..end);
+        }
+
+        Err(NodeError::TypeMismatch {
+            field: "result".to_string(),
+            expected: type_name::<Range<u32>>().to_string(),
+        })
+    }
+}
+
+impl FromSharedValue for RangeInclusive<u32> {
+    fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
+        if let Some(range_value) = value.downcast_ref::<RangeInclusive<u32>>() {
+            return Ok(range_value.clone());
+        }
+
+        if let Some(range_value) = value.downcast_ref::<RangeInclusive<i32>>() {
+            let start = u32::try_from(*range_value.start()).map_err(|_| NodeError::TypeMismatch {
+                field: "result".to_string(),
+                expected: type_name::<RangeInclusive<u32>>().to_string(),
+            })?;
+            let end = u32::try_from(*range_value.end()).map_err(|_| NodeError::TypeMismatch {
+                field: "result".to_string(),
+                expected: type_name::<RangeInclusive<u32>>().to_string(),
+            })?;
+
+            return Ok(start..=end);
+        }
+
+        Err(NodeError::TypeMismatch {
+            field: "result".to_string(),
+            expected: type_name::<RangeInclusive<u32>>().to_string(),
+        })
     }
 }
 

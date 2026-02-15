@@ -11,7 +11,7 @@ Expressions can include arithmetic operations, string interpolation, and referen
 
 - Relevant grammar rules in crates/conduit/schema.pest:
     - expression = numeric ~ (operation ~ numeric)*
-    - numeric = number | string | relation | identifier | (expression)
+    - numeric = `number` | `string` | `relation` | `identifier` | `(expression)`
     - operation includes: add (+), subtract (-), multiply (*), divide (/)
 
 ## Value types
@@ -20,8 +20,6 @@ Expressions can include arithmetic operations, string interpolation, and referen
 - String: double-quoted text with optional interpolation, e.g. `"hello"` or `"Hello {name}"`
 - Boolean: `true`, `false`
 - Relation / Reference: `node::property` (used to reference other node outputs)
-- Tuple and Array: for grouping values
-- Node / Anonymous Node: nodes can be used as inline values
 
 ## Operators and precedence
 
@@ -84,7 +82,7 @@ for arithmetic — attempting to use a non-numeric value in a numeric context wi
 references (e.g. `node::property`) and identifiers are resolved from node outputs or literal node inputs and must yield
 numeric values for arithmetic to succeed.
 
-## Real examples
+## Examples
 
 1 - Celsius conversion (from examples):
 

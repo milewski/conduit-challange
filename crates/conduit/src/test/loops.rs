@@ -98,6 +98,23 @@ fn test_passing_array_as_input() {
 }
 
 #[test]
+fn test_for_loop_supports_inclusive_ranges() {
+    let output: u32 = pipeline! {r#"
+        store _ {
+            counter <- 0
+        }
+
+        for index in 0..=5 {
+            store::counter <- (store::counter + index)
+        }
+
+        <- store::counter
+    "#};
+
+    assert_eq!(output, 15);
+}
+
+#[test]
 fn test_for_loop_can_iterate_inline_array_literal() {
     let output: u32 = pipeline! {r#"
         store _ {
@@ -157,39 +174,4 @@ fn test_arrays_can_be_given_from_inputs() {
     "#};
 
     assert_eq!(output, "World");
-}
-
-#[test]
-fn test_all_numeric_types_inputs() {
-    let inputs = input! {
-        u8: 1u8,
-        u16: 1u16,
-        u32: 1u32,
-        u64: 1u64,
-        u128: 1u128,
-        usize: 1usize,
-        i8: 1i8,
-        i16: 1i16,
-        i32: 1i32,
-        i64: 1i64,
-        i128: 1i128,
-        isize: 1isize,
-        f32: 1.0f32,
-        f64: 1.0f64
-    };
-
-    let output: (u8, String) = pipeline! {inputs, r#"
-        -> u8 -> u16 -> u32 -> u64 -> u128 -> usize
-        -> i8 -> i16 -> i32 -> i64 -> i128 -> isize
-        -> f32 -> f64
-
-        store _ {
-            value <- (u8 + u16 + u32 + u64 + u128 + usize + i8 + i16 + i32 + i64 + i128 + isize + f32 + f64)
-        }
-
-        <- store::value
-        <- "{ store::value }"
-    "#};
-
-    assert_eq!(output, (14u8, "14".to_string()));
 }

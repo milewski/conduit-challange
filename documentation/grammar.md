@@ -4,11 +4,20 @@ title: Grammar
 
 # Grammar
 
-## Key Grammar Rules
+## Key Concepts and Syntax
 
-- Node: `identifier module { ... }`
+This document describes the core grammar of the Conduit DSL: how to define nodes (modules), inputs, outputs, and
+control structures. Examples use the `conduit` fenced code block for DSL snippets and `rust` for Rust node definitions.
 
-the body of a node follow this structure:
+---
+
+## Nodes
+
+A node (also called a module) has the form:
+
+`identifier module { ... }`
+
+The body of a node follows this structure:
 
 ```conduit
 name module {
@@ -16,7 +25,7 @@ name module {
 }
 ```
 
-the `name` is optional, if not provided the node will be anonymous and cannot be referenced by other nodes.
+The `name` is optional. If a node has no name it is anonymous and cannot be referenced elsewhere.
 
 ```conduit
 module {
@@ -24,9 +33,9 @@ module {
 }
 ```
 
-modules can define properties that are considered `input` which can be easily piped from other nodes for example:
+Nodes can define properties that are inputs. Inputs can be provided directly or piped from other nodes.
 
-the following rust module has the path marked with the `#[input]` macro
+Example Rust node that declares an input using the `#[input]` attribute:
 
 ```rust
 #[node]
@@ -35,7 +44,7 @@ async fn read_file(#[input] path: String) -> Result<Vec<u8>, NodeError> {
 }
 ```
 
-then it can be used like this:
+This node can be used in the DSL in two equivalent ways:
 
 ```conduit
 file_a read_file {
@@ -47,17 +56,16 @@ file_b read_file {
 }
 ```
 
-both examples are valid, the name of defaults inputs can be ommited and simply assigned with <- this allows some
-interesting possibilities for example:
+Both examples are valid. If the default input name is omitted, the value can be assigned directly with `<-`.
 
 ```conduit
 <- read_file <- "example.txt"
 ```
 
-In this example the literal string "example.txt" is assigned to the default input of the `read_file` node and the output
-of the node is immediately returned as the output of the pipeline.
+The string literal `"example.txt"` is assigned to the default input of the `read_file` node, and the node's output
+is returned as the pipeline output.
 
-the output of a node can also be assigned within the node body:
+The output of a node can also be assigned to another node inside a node body:
 
 ```conduit
 read_file {
@@ -66,10 +74,9 @@ read_file {
 }
 ```
 
-in this example the output of the `read_file` node is assigned to the input of a `logger` node, this allows for more
-complex operations and chaining of nodes.
+In this example, the output of `read_file` is piped into the `logger` node. This enables chaining and composition.
 
-a complex chaining operation could be defined as the following:
+A more complex chain:
 
 ```conduit
 resize {
@@ -80,9 +87,10 @@ resize {
 }
 ```
 
-this example it takes the output of the `read_file` node, pass it to the input of resize node, which resizes the input
-and pipe the output to the `save_file` node which saves the resized image as `resized.png`, 
-all nodes creates a DAG that can be visualized by passing the pipeline to a graph visualization tool.
+This pipeline reads `example.png`, resizes it to 512×512, and then passes the result to `save_file`, which writes
+`resized.png`. Nodes form a directed acyclic graph (DAG) and can be visualized with graph tools.
+
+Example using a Rust macro to generate a Graphviz representation:
 
 ```rust
 graphviz!(r#"
@@ -95,26 +103,32 @@ graphviz!(r#"
 "#);
 ```
 
+Generated DOT example:
+
 ```dot
 digraph {
     0 [ label="save_file"]
     1 [ label="read_file"]
     2 [ label="resize"]
-    1 -> 2 [ ]
-    2 -> 0 [ ]
+    1 -> 2
+    2 -> 0
 }
 ```
-----
-- Input definition: `-> x, y`, it is ussuly defined at the top of the file and indicates that the workflow will receive
-  a X, Y value externally
 
-it can be defined in two forms, short form:
+---
+
+## Inputs (Workflow Parameters)
+
+Workflow-level inputs are declared with `->` and are usually placed at the top of the file. They indicate values
+that the workflow expects from the environment.
+
+Short form:
 
 ```conduit
 -> x, y, z
 ```
 
-or long form:
+Long form:
 
 ```conduit
 -> x
@@ -122,14 +136,14 @@ or long form:
 -> z
 ```
 
-or mixed
+Mixed form:
 
 ```conduit
 -> x, y
 -> z, w
 ```
 
-default values can be provided as the following:
+Default values can be provided:
 
 ```conduit
 -> x <- 1
@@ -137,89 +151,93 @@ default values can be provided as the following:
 -> z <- 3
 ```
 
-if the inlined form is used the default is assigned to all values, example:
+If the inline form is used, the default is assigned to all listed inputs:
 
 ```conduit
 -> x, y, z <- "example"
 ```
 
-in this example `x`, `y` and `z` will be assigned with a default value of `example`
+In this case, `x`, `y`, and `z` all receive the default value `"example"`.
 
-if the inputs has no default and are not provided externally, an error will be thrown.
+If an input has no default and is not provided externally, the workflow will produce an error.
 
-inputs can also have default values assigned from output of other nodes, example:
+Inputs can also receive default values from other nodes:
 
 ```conduit
 -> x <- random { between 0..100 }
 -> y <- random { between 0..100 }
 ```
 
-> Note the random node defined above is just an example, there are no built-in nodes in the language, all nodes must be
-> defined by the user or imported from external modules.
------
-- Pipeline result: `<- value`
+Note: `random` is only an example. There are no built-in nodes in the language—nodes must be defined by the user
+or imported from external modules.
 
-Outputs are defined using the `<-` at the root level of the file,
+---
 
-example:
+## Pipeline Outputs
+
+Pipeline outputs are declared at the top level with `<-`.
+
+Example (echo inputs):
 
 ```conduit
 -> x, y
 <- x, y
 ```
 
-This example it takes the input and imediately outputs it.
-
-the output can also be an expression or a node reference:
+The output can be an expression or a node reference:
 
 ```conduit
 <- (x + y) * 2
 <- some_node::output
 ```
 
-multiple outputs can be defined in the same statement:
+Multiple outputs and tuple outputs are supported:
 
 ```conduit
 <- x, (y * 2), some_node::output
-```
-
-tuples can also be returned as outputs:
-
-```conduit
 <- (1, (2, 3))
 ```
-----
-- For loop: `for index in 0..10 { ... }`
 
-for loops can be used to repeat a block of code a certain number of times, the index variable is available inside the
-loop body and can be used in expressions or node parameters.
+---
+
+## Control Flow: For Loops
+
+For loops allow repeating a block of code. The loop variable is available inside the loop body and can be used in
+expressions or node parameters.
+
+Range example:
 
 ```conduit
 for index in 0..5 {
-
+  // iterate index = 0..4
 }
 ```
 
-arrays can also be iterated over:
+Array iteration:
 
 ```conduit
 for number in [1 2 3] {
-
+  // iterate number = 1, 2, 3
 }
 ```
 
-inputs or properties of other nodes can also be iterated over:
+Iterating over node properties or workflow inputs:
 
 ```conduit
 -> items <- [1 2 3]
 
-for item in node::items {}
-for item in items {}
+for item in node::items {
+  // use item
+}
+
+for item in items {
+  // use item
+}
 ```
 
-ranges can be inclusive or exclusive:
+Ranges can be exclusive or inclusive:
 
 ```conduit
-for index in 0..10 { ... } # exclusive, iterates from 0 to 9
-for index in 0..=10 { ... } # inclusive, iterates from 0 to 10
+for index in 0..10 { /* exclusive: 0..9 */ }
+for index in 0..=10 { /* inclusive: 0..10 */ }
 ```
