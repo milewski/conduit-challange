@@ -10,8 +10,21 @@
       {
         "tab": "Home",
         "pages": [
-          "expression",
-          "home"
+          "home.mdx",
+          "expression.mdx"
+        ]
+      },
+      {
+        "tab": "Reference",
+        "pages": [
+          "README.md",
+          "grammar.mdx",
+          "keywords-operators.mdx",
+          "node-syntax.mdx",
+          "expressions.mdx",
+          "usage-patterns.mdx",
+          "examples.mdx",
+          "references.mdx"
         ]
       }
     ]
