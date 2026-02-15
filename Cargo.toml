@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "examples/conduit-example",
-    "packages/*",
+    "crates/*",
 ]
 
 [workspace.dependencies]
@@ -13,6 +13,6 @@ thiserror = "2.0.18"
 inventory = "0.3.21"
 petgraph = "0.8.3"
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "time", "sync", "fs"] }
-conduit = { path = "./packages/conduit" }
+conduit = { path = "crates/conduit" }
 async-trait = "0.1.89"
-conduit-derive = { path = "./packages/conduit-derive" }
+conduit-derive = { path = "crates/conduit-derive" }

@@ -16,7 +16,7 @@
 
 ## DSL Documentation
 
-For detailed documentation on the DSL syntax and usage, refer to the [DSL Test](./packages/conduit/src/test) folder. 
+For detailed documentation on the DSL syntax and usage, refer to the [DSL Test](crates/conduit/src/test) folder. 
 This file contains comprehensive examples and explanations of the DSL's features and conventions.
 
 ## Code Style
