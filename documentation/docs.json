@@ -7,16 +7,16 @@
   },
   "navigation": {
     "pages": [
-      "home.md",
-      "expression.md",
-      "README.md",
-      "grammar.md",
-      "keywords-operators.md",
-      "node-syntax.md",
-      "expressions.md",
-      "usage-patterns.md",
-      "examples.md",
-      "references.md"
+      "home",
+      "expression",
+      "README",
+      "grammar",
+      "keywords-operators",
+      "node-syntax",
+      "expressions",
+      "usage-patterns",
+      "examples",
+      "references"
     ]
   }
 }
