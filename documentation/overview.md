@@ -2,8 +2,6 @@
 title: Overview
 ---
 
-# Overview
-
 ## Key Concepts and Syntax
 
 This document describes the core grammar of the Conduit DSL: how to define nodes (modules), inputs, outputs, and
@@ -115,9 +113,11 @@ digraph {
 }
 ```
 
+You can preview the graph online [here](https://dreampuf.github.io/GraphvizOnline/?engine=dot#digraph%20%7B%0D%0A%20%20%20%200%20%5B%20label%3D%22save_file%22%5D%0D%0A%20%20%20%201%20%5B%20label%3D%22read_file%22%5D%0D%0A%20%20%20%202%20%5B%20label%3D%22resize%22%5D%0D%0A%20%20%20%201%20-%3E%202%0D%0A%20%20%20%202%20-%3E%200%0D%0A%7D)
+
 ---
 
-## Inputs (Workflow Parameters)
+## Workflow Inputs
 
 Workflow-level inputs are declared with `->` and are usually placed at the top of the file. They indicate values
 that the workflow expects from the environment.
@@ -173,7 +173,7 @@ or imported from external modules.
 
 ---
 
-## Pipeline Outputs
+## Workflow Outputs
 
 Pipeline outputs are declared at the top level with `<-`.
 
@@ -243,6 +243,8 @@ for index in 0..=10 { /* inclusive: 0..10 */ }
 ```
 
 ----
+# Sequential execution
+
 All nodes run in parallel by default. To run nodes sequentially, use a sequence group:
 
 ```conduit
@@ -259,8 +261,9 @@ node_d ping <- "https://example.com"
 Since these nodes do not have any dependencies between them, they will run in parallel.
 However, because `node_b` and `node_c` are wrapped in a sequence group, they will run sequentially.
 
-
 --- 
+
+# Arrays
 
 You can append a value to an existing array using the `<<-` operator. Example:
 
