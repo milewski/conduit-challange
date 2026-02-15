@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, ItemFn};
+use syn::{ItemFn, parse_macro_input};
 
 use crate::utils::{extract_emitter_event_type, extract_option_inner_type, extract_result_types};
 
