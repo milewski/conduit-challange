@@ -8,7 +8,6 @@
   "navigation": {
     "pages": [
       "home",
-      "expression",
       "grammar",
       "keywords-operators",
       "node-syntax",
