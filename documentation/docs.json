@@ -10,7 +10,7 @@
       {
         "tab": "Home",
         "pages": [
-          "expression.mdx"
+          "expression"
         ]
       },
       {
@@ -18,13 +18,13 @@
         "pages": [
           "test-abc",
           "README.md",
-          "grammar.mdx",
-          "keywords-operators.mdx",
-          "node-syntax.mdx",
-          "expressions.mdx",
-          "usage-patterns.mdx",
-          "examples.mdx",
-          "references.mdx"
+          "grammar",
+          "keywords-operators",
+          "node-syntax",
+          "expressions",
+          "usage-patterns",
+          "examples",
+          "references"
         ]
       }
     ]
