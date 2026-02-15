@@ -6,15 +6,14 @@
     "primary": "#0D9373"
   },
   "navigation": {
-    "pages": [
-      "README.md",
-      "grammar.mdx",
-      "keywords-operators.mdx",
-      "node-syntax.mdx",
-      "expressions.mdx",
-      "usage-patterns.mdx",
-      "examples.mdx",
-      "references.mdx"
+    "tabs": [
+      {
+        "tab": "Home",
+        "pages": [
+          "expression",
+          "home"
+        ]
+      }
     ]
   }
 }
