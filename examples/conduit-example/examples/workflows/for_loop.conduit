@@ -1,0 +1,30 @@
+-> source, prefix
+
+store _ {
+    processed <- 0
+    paths <- []
+}
+
+source_image read_file <- source
+
+for size in [ 128 256 512 ] {
+
+    path _ {
+       <- "{ prefix }.{ size }.png"
+    }
+
+    resizer {
+        <- source_image
+        width <- size
+        height <- size
+        -> write_file {
+            destination <- path
+        }
+    }
+
+    store::processed <- (store::processed + 1)
+    store::paths <<- path
+}
+
+<- store::processed
+<- store::paths

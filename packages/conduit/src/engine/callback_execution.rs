@@ -1,5 +1,6 @@
 use crate::dsl::parser::{
-    CallbackAssignment, Direction, EVENT_PAYLOAD_IDENTIFIER, EventCallback, Identifier, NodeInstruct, StringPart, Value,
+    CallbackAssignment, CallbackAssignmentOperation, Direction, EVENT_PAYLOAD_IDENTIFIER, EventCallback, Identifier,
+    NodeInstruct, StringPart, Value,
 };
 use crate::node::SharedValue;
 use crate::registry::{NodeRegistry, Payload};
@@ -131,14 +132,34 @@ impl<'a> CallbackExecutionContext<'a> {
                 EventCallback::Assignment(CallbackAssignment {
                     identifier,
                     property,
+                    operation,
                     value,
                 }) => {
                     let resolved_value =
                         super::resolve_single_value(&value, self.outputs, self.nodes, self.input_names)?;
-                    self.outputs
-                        .entry(identifier)
-                        .or_default()
-                        .insert(property, resolved_value);
+                    let node_outputs = self.outputs.entry(identifier).or_default();
+                    match operation {
+                        CallbackAssignmentOperation::Assign => {
+                            node_outputs.insert(property, resolved_value);
+                        }
+                        CallbackAssignmentOperation::Append => {
+                            let mut values = match node_outputs.get(&property) {
+                                Some(existing_value) => {
+                                    if let Some(existing_values) = existing_value.downcast_ref::<Vec<SharedValue>>() {
+                                        existing_values.clone()
+                                    } else {
+                                        return Err(crate::node::NodeError::Custom(format!(
+                                            "Cannot append to non-array '{}'",
+                                            property
+                                        )));
+                                    }
+                                }
+                                None => Vec::new(),
+                            };
+                            values.push(resolved_value);
+                            node_outputs.insert(property, Arc::new(values));
+                        }
+                    }
                 }
                 EventCallback::Block(callbacks) => {
                     for callback in callbacks {

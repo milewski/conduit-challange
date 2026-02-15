@@ -69,9 +69,16 @@ pub enum Value {
 }
 
 #[derive(Debug, PartialEq, Clone, Eq, Hash)]
+pub enum CallbackAssignmentOperation {
+    Assign,
+    Append,
+}
+
+#[derive(Debug, PartialEq, Clone, Eq, Hash)]
 pub struct CallbackAssignment {
     pub identifier: Identifier,
     pub property: Property,
+    pub operation: CallbackAssignmentOperation,
     pub value: Value,
 }
 
@@ -122,6 +129,7 @@ impl From<Pair<'_, Rule>> for Direction {
     fn from(value: Pair<'_, Rule>) -> Self {
         match value.as_str() {
             "<-" => Direction::Input,
+            "<<-" => Direction::Input,
             "->" => Direction::Output,
             _ => unreachable!(),
         }
@@ -240,6 +248,7 @@ impl Visitor {
         assert_eq!(callback_assignment.as_rule(), Rule::callback_assignment);
         let mut pairs = callback_assignment.into_inner();
         let relation_pair = pairs.next().unwrap_or_else(|| unreachable!());
+        let operation_pair = pairs.next().unwrap_or_else(|| unreachable!());
         let value_pair = pairs.next().unwrap_or_else(|| unreachable!());
 
         let mut relation_parts = relation_pair.into_inner();
@@ -261,6 +270,11 @@ impl Visitor {
         Ok(CallbackAssignment {
             identifier: resolved_identifier,
             property: property_pair.as_str().to_string(),
+            operation: match operation_pair.as_str() {
+                "<-" => CallbackAssignmentOperation::Assign,
+                "<<-" => CallbackAssignmentOperation::Append,
+                _ => unreachable!(),
+            },
             value: callback_value,
         })
     }
@@ -425,6 +439,7 @@ impl Visitor {
             let alias_capture_assignment = EventCallback::Assignment(CallbackAssignment {
                 identifier: alias_storage_identifier,
                 property: "output".to_string(),
+                operation: CallbackAssignmentOperation::Assign,
                 value: Value::Relation {
                     identifier: EVENT_PAYLOAD_IDENTIFIER.to_string(),
                     direction: Direction::Input,
@@ -633,28 +648,6 @@ impl Visitor {
             let mut new_node = NodeInstruct::new(Some(&new_id), &original_module);
             new_node.inputs = original_node.inputs.clone();
 
-            // Map the assignment property (which was parsed as module property)
-            // e.g. store::counter -> module_property is "counter"
-            let target_prop = module_property.as_ref().unwrap().as_str().to_string();
-
-            // We'll process body/shorthand and insert values into this new node
-            // But wait, the shorthand/body logic inserts into `node.inputs`.
-            // If the shorthand is just `<- val`, it puts `val` into input named "input" (or from direction).
-            // We want it in `target_prop`.
-
-            // Special handling for assignment body:
-            // If shorthand: `<- value` -> insert into `target_prop`.
-            // If body: `parameter` -> insert into `parameter`.
-            // BUT strict assignment syntax `store::counter <- val` corresponds to shorthand.
-
-            new_node.inputs.insert(
-                target_prop.clone(),
-                Value::Numeric {
-                    direction: Direction::Input,
-                    value: "0".to_string(),
-                },
-            ); // Placeholder
-
             new_node
         } else {
             // Normal node definition
@@ -691,10 +684,31 @@ impl Visitor {
             match body_or_shorthand.as_rule() {
                 Rule::shorthand => {
                     let mut pairs = body_or_shorthand.into_inner();
-                    let _ = pairs.next();
+                    let direction_pair = pairs.next().unwrap_or_else(|| unreachable!());
                     let pair = pairs.next().unwrap().into_inner().next().unwrap();
                     let value = self.visit_value(pair, Direction::Input)?;
-                    node.inputs.insert(target_prop, value);
+                    if direction_pair.as_str() == "<<-" {
+                        let mut values = match node.inputs.get(&target_prop).cloned() {
+                            Some(Value::Tuple { values, .. }) => values,
+                            Some(_) => {
+                                return Err(ParserError::AppendToNonArray {
+                                    identifier: module_identifier.as_str().to_string(),
+                                    property: target_prop,
+                                });
+                            }
+                            None => Vec::new(),
+                        };
+                        values.push(value);
+                        node.inputs.insert(
+                            target_prop,
+                            Value::Tuple {
+                                direction: Direction::Input,
+                                values,
+                            },
+                        );
+                    } else {
+                        node.inputs.insert(target_prop, value);
+                    }
                 }
                 Rule::body => self.visit_body(&mut node, body_or_shorthand)?, // Body allows multiple params
                 _ => unreachable!(),
@@ -772,7 +786,13 @@ impl Visitor {
                         let value = pairs.next().unwrap_or_else(|| unreachable!());
                         let direction_string = direction.as_str();
                         let property_names = match direction_string {
-                            "<-" => vec!["input".to_string()],
+                            "<-" | "<<-" => {
+                                if node.module == "_" {
+                                    vec!["output".to_string()]
+                                } else {
+                                    vec!["input".to_string()]
+                                }
+                            }
                             "->" => vec!["output".to_string()],
                             _ => unreachable!(),
                         };
@@ -1619,6 +1639,44 @@ mod tests {
         };
         assert_eq!(explicit_identifier, EVENT_PAYLOAD_IDENTIFIER);
         assert_eq!(explicit_property, "output");
+    }
+
+    #[test]
+    fn test_event_handler_array_append_assignment() {
+        let workflow = NodeParser::parse(
+            r#"
+            store _ { paths <- [] }
+            source task {
+                count <- 1
+                on done payload {
+                    store::paths <<- payload
+                }
+            }
+            "#,
+        )
+        .expect("append assignment should parse");
+
+        let callbacks = workflow
+            .event_handlers
+            .get("source")
+            .and_then(|handlers| handlers.get("done"))
+            .expect("done callbacks should exist");
+
+        let EventCallback::Block(statements) = &callbacks[0] else {
+            panic!("expected callback block")
+        };
+
+        let has_append_assignment = statements.iter().any(|statement| {
+            matches!(
+                statement,
+                EventCallback::Assignment(CallbackAssignment {
+                    operation: CallbackAssignmentOperation::Append,
+                    ..
+                })
+            )
+        });
+
+        assert!(has_append_assignment, "expected append assignment in callback block");
     }
 
     #[test]

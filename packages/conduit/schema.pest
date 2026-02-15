@@ -31,7 +31,8 @@ event_callback = { callback_block | value }
 
 callback_block = { "{" ~ NEWLINE* ~ (callback_statement ~ NEWLINE*)* ~ "}" }
 callback_statement = { callback_assignment | node | anonymous_node }
-callback_assignment = { relation ~ "<-" ~ value }
+callback_assignment = { relation ~ callback_assignment_operator ~ value }
+callback_assignment_operator = { "<-" | "<<-" }
 
 string = ${ "\"" ~ (interpolation | string_content)* ~ "\"" }
 string_content = @{ char+ }
@@ -70,7 +71,7 @@ operation = _{ add | subtract | multiply | divide | power }
     divide   = { "/" }
     power    = { "^" }
 
-direction = { "<-" | "->" }
+direction = { "<<-" | "<-" | "->" }
 identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHA | ASCII_DIGIT | "_")* }
 module = ${ identifier ~ ("::" ~ property)? }
 property = @{ (ASCII_ALPHA | ASCII_DIGIT | "_")+ }

@@ -32,6 +32,9 @@ pub enum ParserError {
     #[error("Mixed types in array")]
     MixedTypesInArray,
 
+    #[error("Cannot append to non-array: {identifier}::{property}")]
+    AppendToNonArray { identifier: String, property: String },
+
     #[error("data store disconnected")]
     ParserError(#[from] pest::error::Error<Rule>),
 }

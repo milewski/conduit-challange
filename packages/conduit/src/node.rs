@@ -28,6 +28,24 @@ macro_rules! impl_from_shared_value_primitive {
 
 impl_from_shared_value_primitive!(String, bool, Vec<u8>);
 
+impl FromSharedValue for Vec<String> {
+    fn from_shared_value(value: &SharedValue) -> Result<Self, NodeError> {
+        let Some(shared_values) = value.downcast_ref::<Vec<SharedValue>>() else {
+            return Err(NodeError::TypeMismatch {
+                field: "result".to_string(),
+                expected: "Vec<SharedValue> (Array)".to_string(),
+            });
+        };
+
+        let mut values = Vec::with_capacity(shared_values.len());
+        for shared_value in shared_values {
+            values.push(String::from_shared_value(shared_value)?);
+        }
+
+        Ok(values)
+    }
+}
+
 macro_rules! impl_from_shared_value_numeric {
     ($($t:ty),*) => {
         $(

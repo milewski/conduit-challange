@@ -130,6 +130,28 @@ fn test_output_using_module_output() {
 }
 
 #[test]
+fn test_data_node_body_implicit_input_maps_to_output() {
+    let (path, destination): (String, String) = pipeline! {r#"
+        prefix _ { output <- "cover" }
+        size _ { output <- "128" }
+
+        path _ {
+            <- "{ prefix }.{ size }.png"
+        }
+
+        write_file _ {
+            destination <- path
+        }
+
+        <- path
+        <- write_file::destination
+    "#};
+
+    assert_eq!(path, "cover.128.png");
+    assert_eq!(destination, "cover.128.png");
+}
+
+#[test]
 fn test_multiple_returns_are_supported_and_is_equivalent_as_returning_tuples() {
     let (a, b, c, d): (String, String, String, (u32, u32)) = pipeline! {r#"
         <- a _::a {      a <- "a" } # module a returning the `a` property

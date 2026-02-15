@@ -115,6 +115,30 @@ fn test_for_loop_can_iterate_inline_array_literal() {
 }
 
 #[test]
+fn test_for_loop_can_append_to_array_store() {
+    let output: Vec<String> = pipeline! {r#"
+        store _ {
+            paths <- []
+        }
+
+        for size in [128 256 512] {
+            store::paths <<- "cover.{ size }.png"
+        }
+
+        <- store::paths
+    "#};
+
+    assert_eq!(
+        output,
+        vec![
+            "cover.128.png".to_string(),
+            "cover.256.png".to_string(),
+            "cover.512.png".to_string()
+        ]
+    );
+}
+
+#[test]
 fn test_arrays_can_be_given_from_inputs() {
     let inputs = input! {
         prompts: vec!["Hello", "World"]
