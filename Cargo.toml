@@ -6,13 +6,13 @@ members = [
 ]
 
 [workspace.dependencies]
-uuid = { version = "1.14.0", features = ["v4"] }
-pest = { version = "2.7.15", features = ["pretty-print"] }
-pest_derive = { version = "2.7.15" }
-thiserror = "2.0.12"
-inventory = "0.3.20"
-petgraph = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+uuid = { version = "1.21.0", features = ["v4"] }
+pest = { version = "2.8.6", features = ["pretty-print"] }
+pest_derive = { version = "2.8.6" }
+thiserror = "2.0.18"
+inventory = "0.3.21"
+petgraph = "0.8.3"
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "time", "sync", "fs"] }
 conduit = { path = "./packages/conduit" }
-async-trait = "0.1"
+async-trait = "0.1.89"
 conduit-derive = { path = "./packages/conduit-derive" }

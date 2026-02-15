@@ -1,0 +1,20 @@
+prompt {
+    <- "What is your name?"
+    on answer name {
+        prompt {
+            <- "Hello { name }!, and how old are you?"
+            on answer age {
+                output _ {
+                    name <- name
+                    age <- string_to_number {
+                        <- age
+                        error_message <- "invalid age, please age should be a number but received: { age }"
+                    }
+                }
+            }
+        }
+    }
+}
+
+<- output::name
+<- output::age

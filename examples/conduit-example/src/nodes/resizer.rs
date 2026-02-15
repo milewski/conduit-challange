@@ -1,38 +1,19 @@
-use async_trait::async_trait;
 use conduit::node::NodeError;
-use conduit::traits::{Emitter, ExecutableNode};
-use conduit_derive::{Node, NodeInput};
+use conduit_derive::node;
 use image::imageops;
 use std::io::Cursor;
 
-#[derive(Node, Default)]
-pub struct Resizer;
+#[node]
+async fn resizer(#[input] source: Vec<u8>, width: u32, height: u32) -> Result<Vec<u8>, NodeError> {
+    let image = image::load_from_memory(&source).map_err(|error| NodeError::Custom(error.to_string()))?;
+    let image = image.resize_to_fill(width, height, imageops::FilterType::Lanczos3);
 
-#[derive(NodeInput)]
-pub struct ResizerInput {
-    #[input]
-    pub source: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-}
+    let mut buffer = Vec::new();
+    let mut cursor = Cursor::new(&mut buffer);
 
-#[async_trait]
-impl ExecutableNode for Resizer {
-    type Input = ResizerInput;
-    type Output = Vec<u8>;
-    type Event = ();
+    image
+        .write_to(&mut cursor, image::ImageFormat::Png)
+        .map_err(|error| NodeError::Custom(error.to_string()))?;
 
-    async fn run(&self, input: Self::Input, _: Emitter<Self::Event>) -> Result<Self::Output, NodeError> {
-        let image = image::load_from_memory(&input.source).map_err(|error| NodeError::Custom(error.to_string()))?;
-        let image = image.resize_to_fill(input.width, input.height, imageops::FilterType::Lanczos3);
-
-        let mut buffer = Vec::new();
-        let mut cursor = Cursor::new(&mut buffer);
-
-        image
-            .write_to(&mut cursor, image::ImageFormat::Png)
-            .map_err(|error| NodeError::Custom(error.to_string()))?;
-
-        Ok(buffer)
-    }
+    Ok::<Vec<u8>, NodeError>(buffer)
 }

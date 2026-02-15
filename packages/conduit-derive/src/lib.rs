@@ -42,6 +42,27 @@ fn extract_emitter_event_type(ty: &syn::Type) -> Option<syn::Type> {
     Some(event_type.clone())
 }
 
+fn extract_option_inner_type(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::Path(type_path) = ty else {
+        return None;
+    };
+
+    let last_segment = type_path.path.segments.last()?;
+    if last_segment.ident != "Option" {
+        return None;
+    }
+
+    let syn::PathArguments::AngleBracketed(generic_arguments) = &last_segment.arguments else {
+        return None;
+    };
+
+    let syn::GenericArgument::Type(inner_type) = generic_arguments.args.first()? else {
+        return None;
+    };
+
+    Some(inner_type)
+}
+
 fn to_snake_case(name: &str) -> String {
     let mut snake_case = String::new();
     for (index, character) in name.chars().enumerate() {
@@ -160,23 +181,43 @@ pub fn node(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 let ident = &pat_ident.ident;
                 let ident_str = ident.to_string();
                 let ty = &pat_type.ty;
+                let option_inner_type = extract_option_inner_type(ty);
 
                 let is_input = input_mapping.get(&ident_str).is_some();
 
                 if is_input {
+                    if let Some(inner_type) = option_inner_type {
+                        return Some(quote! {
+                            #ident: payload
+                                .get("input")
+                                .or_else(|| payload.get(#ident_str))
+                                .map(|value| <#inner_type as conduit::node::FromSharedValue>::from_shared_value(value))
+                                .transpose()?
+                        });
+                    }
+
                     return Some(quote! {
                         #ident: payload
                             .get("input")
                             .or_else(|| payload.get(#ident_str))
                             .ok_or(conduit::node::NodeError::MissingInput("input or explicit field".to_string()))
-                            .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
+                            .and_then(|value| <#ty as conduit::node::FromSharedValue>::from_shared_value(value))?
                     });
                 } else {
+                    if let Some(inner_type) = option_inner_type {
+                        return Some(quote! {
+                            #ident: payload
+                                .get(#ident_str)
+                                .map(|value| <#inner_type as conduit::node::FromSharedValue>::from_shared_value(value))
+                                .transpose()?
+                        });
+                    }
+
                     return Some(quote! {
                         #ident: payload
                             .get(#ident_str)
                             .ok_or(conduit::node::NodeError::MissingInput(#ident_str.to_string()))
-                            .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
+                            .and_then(|value| <#ty as conduit::node::FromSharedValue>::from_shared_value(value))?
                     });
                 }
             }
@@ -356,23 +397,43 @@ pub fn derive_node_input(input: TokenStream) -> TokenStream {
         let field_name = field.ident.as_ref().unwrap();
         let field_name_str = field_name.to_string();
         let ty = &field.ty;
+        let option_inner_type = extract_option_inner_type(ty);
 
         let has_input_attr = field.attrs.iter().any(|attr| attr.path().is_ident("input"));
 
         if has_input_attr {
+            if let Some(inner_type) = option_inner_type {
+                return quote! {
+                    #field_name: payload
+                        .get("input")
+                        .or_else(|| payload.get(#field_name_str))
+                        .map(|value| <#inner_type as conduit::node::FromSharedValue>::from_shared_value(value))
+                        .transpose()?
+                };
+            }
+
             quote! {
                 #field_name: payload
                     .get("input")
                     .or_else(|| payload.get(#field_name_str))
                     .ok_or(conduit::node::NodeError::MissingInput("input or explicit field".to_string()))
-                    .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
+                    .and_then(|value| <#ty as conduit::node::FromSharedValue>::from_shared_value(value))?
             }
         } else {
+            if let Some(inner_type) = option_inner_type {
+                return quote! {
+                    #field_name: payload
+                        .get(#field_name_str)
+                        .map(|value| <#inner_type as conduit::node::FromSharedValue>::from_shared_value(value))
+                        .transpose()?
+                };
+            }
+
             quote! {
                 #field_name: payload
                     .get(#field_name_str)
                     .ok_or(conduit::node::NodeError::MissingInput(#field_name_str.to_string()))
-                    .and_then(|v| <#ty as conduit::node::FromSharedValue>::from_shared_value(v))?
+                    .and_then(|value| <#ty as conduit::node::FromSharedValue>::from_shared_value(value))?
             }
         }
     });

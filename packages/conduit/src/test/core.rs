@@ -142,6 +142,33 @@ fn test_custom_module_can_be_processed() {
 }
 
 #[test]
+fn test_node_macro_supports_optional_input_fields() {
+    #[conduit_derive::node]
+    async fn optional_prefix(#[input] input: String, prefix: Option<String>) -> String {
+        match prefix {
+            Some(prefix) => format!("{}{}", prefix, input),
+            None => input,
+        }
+    }
+
+    let output_without_prefix: String = pipeline! {r#"
+        <- optional_prefix {
+            <- "world"
+        }
+    "#};
+
+    let output_with_prefix: String = pipeline! {r#"
+        <- optional_prefix {
+            <- "world"
+            prefix <- "hello "
+        }
+    "#};
+
+    assert_eq!(output_without_prefix, "world");
+    assert_eq!(output_with_prefix, "hello world");
+}
+
+#[test]
 fn test_nested_modules() {
     let output: u32 = pipeline! {r#"
         <- multiplier {               # 4 * 2 = 8

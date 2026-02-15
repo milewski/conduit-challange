@@ -1,4 +1,5 @@
-pub mod metadata;
-pub mod read_file;
-pub mod resizer;
-pub mod write_file;
+mod filesystem;
+mod metadata;
+mod numbers;
+mod prompt;
+mod resizer;

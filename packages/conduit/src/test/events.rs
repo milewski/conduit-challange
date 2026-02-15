@@ -359,3 +359,30 @@ fn test_event_payload_alias_can_be_interpolated_in_string() {
 
     assert_eq!(output, "Awesome the width was: 3, how about the height?");
 }
+
+#[test]
+fn test_callback_block_data_node_executes_inline_node_before_resolution() {
+    #[functional_node]
+    fn convert_to_number(#[input] input: String) -> Result<u32, String> {
+        input.parse::<u32>().map_err(|error| error.to_string())
+    }
+
+    let output: u32 = pipeline! {r#"
+        config _ {
+            age <- "20"
+        }
+
+        task {
+            count <- 1
+            on done {
+                output _ {
+                    age <- convert_to_number <- config::age
+                }
+            }
+        }
+
+        <- output::age
+    "#};
+
+    assert_eq!(output, 20);
+}

@@ -133,6 +133,7 @@ impl<'a> CallbackExecutionContext<'a> {
                     property,
                     value,
                 }) => {
+                    self.ensure_callback_dependencies_resolved(&value).await?;
                     let resolved_value =
                         super::resolve_single_value(&value, self.outputs, self.nodes, self.input_names)?;
                     self.outputs
@@ -174,6 +175,9 @@ impl<'a> CallbackExecutionContext<'a> {
             };
 
             if callback_node.module == "_" || !self.registry.has(&callback_node.module) {
+                let mut visited_identifiers = HashSet::new();
+                Box::pin(self.execute_callback_dependencies(&identifier, &mut visited_identifiers)).await?;
+
                 let mut resolved_callback_outputs =
                     super::resolve_inputs(&callback_node, self.outputs, self.nodes, self.input_names)?;
 
@@ -207,6 +211,53 @@ impl<'a> CallbackExecutionContext<'a> {
         }
 
         let _ = super::resolve_single_value(&callback_value, self.outputs, self.nodes, self.input_names)?;
+        Ok(())
+    }
+
+    async fn ensure_callback_dependencies_resolved(
+        &mut self,
+        callback_value: &Value,
+    ) -> Result<(), crate::node::NodeError> {
+        let mut dependency_identifiers = Vec::new();
+        collect_input_dependency_targets(callback_value, &mut dependency_identifiers);
+
+        let mut visited_dependency_identifiers = HashSet::new();
+
+        for dependency_identifier in dependency_identifiers {
+            if !visited_dependency_identifiers.insert(dependency_identifier.clone())
+                || self.outputs.contains_key(&dependency_identifier)
+            {
+                continue;
+            }
+
+            let Some(dependency_node) = self.nodes.get(&dependency_identifier).cloned() else {
+                continue;
+            };
+
+            let mut visited_identifiers = HashSet::new();
+            Box::pin(self.execute_callback_dependencies(&dependency_identifier, &mut visited_identifiers)).await?;
+
+            if dependency_node.module == "_" || !self.registry.has(&dependency_node.module) {
+                let resolved_outputs =
+                    super::resolve_inputs(&dependency_node, self.outputs, self.nodes, self.input_names)?;
+                if !resolved_outputs.is_empty() {
+                    self.outputs
+                        .entry(dependency_identifier.clone())
+                        .or_default()
+                        .extend(resolved_outputs);
+                }
+                continue;
+            }
+
+            let dependency_payload =
+                super::resolve_inputs(&dependency_node, self.outputs, self.nodes, self.input_names)?;
+            self.execute_node(&dependency_identifier, &dependency_node, dependency_payload)
+                .await?;
+
+            let mut visited_identifiers = HashSet::new();
+            Box::pin(self.execute_output_chained_nodes(&dependency_identifier, &mut visited_identifiers)).await?;
+        }
+
         Ok(())
     }
 

@@ -1,2 +1,2 @@
 pub use conduit::*;
-mod nodes;
+pub mod nodes;
