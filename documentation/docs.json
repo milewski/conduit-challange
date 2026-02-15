@@ -7,7 +7,14 @@
   },
   "navigation": {
     "pages": [
-      "test"
+      "README.md",
+      "grammar.mdx",
+      "keywords-operators.mdx",
+      "node-syntax.mdx",
+      "expressions.mdx",
+      "usage-patterns.mdx",
+      "examples.mdx",
+      "references.mdx"
     ]
   }
 }
