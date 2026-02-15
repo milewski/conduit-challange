@@ -1,8 +1,8 @@
 ---
-title: Grammar
+title: Overview
 ---
 
-# Grammar
+# Overview
 
 ## Key Concepts and Syntax
 
@@ -256,13 +256,13 @@ node_a ping <- "https://example.com"
 node_d ping <- "https://example.com"
 ```
 
-Since these nodes does not have any dependencies between them, they will run in parallel.
-However, `node_b` and `node_c` are wrapped in a sequence group, so they will run sequentially.
+Since these nodes do not have any dependencies between them, they will run in parallel.
+However, because `node_b` and `node_c` are wrapped in a sequence group, they will run sequentially.
 
 
 --- 
 
-User can also append data to array using `<<-` example:
+You can append a value to an existing array using the `<<-` operator. Example:
 
 ```conduit
 config _ {
@@ -274,5 +274,5 @@ config::items <<- 4
 <- config::items
 ```
 
-this will output `[1 2 3 4]` since `<<-` appends to the existing array instead.
+The example above results in the array `[1 2 3 4]`; the `<<-` operator appends the value to the existing array. The language enforces homogeneous array types: attempting to append a value whose type does not match the array's element type (for example, appending a number to an array of strings) will produce a clear error at parse time or at runtime for dynamic appends.
 
