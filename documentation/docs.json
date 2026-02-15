@@ -6,27 +6,17 @@
     "primary": "#0D9373"
   },
   "navigation": {
-    "tabs": [
-      {
-        "tab": "Home",
-        "pages": [
-          "expression"
-        ]
-      },
-      {
-        "tab": "Reference",
-        "pages": [
-          "test-abc",
-          "README.md",
-          "grammar",
-          "keywords-operators",
-          "node-syntax",
-          "expressions",
-          "usage-patterns",
-          "examples",
-          "references"
-        ]
-      }
+    "pages": [
+      "home.md",
+      "expression.md",
+      "README.md",
+      "grammar.md",
+      "keywords-operators.md",
+      "node-syntax.md",
+      "expressions.md",
+      "usage-patterns.md",
+      "examples.md",
+      "references.md"
     ]
   }
 }
