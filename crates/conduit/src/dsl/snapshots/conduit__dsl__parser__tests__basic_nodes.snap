@@ -1,0 +1,13 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser :: parse(\"named module {}\")"
+---
+Ok(
+    {
+        "named": NodeInstruct {
+            identifier: "named",
+            module: "module",
+            inputs: {},
+        },
+    },
+)

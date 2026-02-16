@@ -1,0 +1,38 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: nodes
+---
+Ok(
+    {
+        "[UUID]": NodeInstruct {
+            identifier: "[UUID]",
+            module: "module_b",
+            inputs: {
+                "input": String {
+                    direction: Input,
+                    parts: [
+                        Literal(
+                            "hello",
+                        ),
+                    ],
+                },
+                "output": Relation {
+                    identifier: "name_a",
+                    direction: Output,
+                    property: "input",
+                },
+            },
+        },
+        "name_a": NodeInstruct {
+            identifier: "name_a",
+            module: "module_a",
+            inputs: {
+                "input": Relation {
+                    identifier: "[UUID]",
+                    direction: Input,
+                    property: "output",
+                },
+            },
+        },
+    },
+)

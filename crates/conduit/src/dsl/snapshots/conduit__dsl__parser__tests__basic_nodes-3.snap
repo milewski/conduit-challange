@@ -1,0 +1,18 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser :: parse(\"anonymous_module { a <- true }\")"
+---
+Ok(
+    {
+        "[UUID]": NodeInstruct {
+            identifier: "[UUID]",
+            module: "anonymous_module",
+            inputs: {
+                "a": Boolean {
+                    direction: Input,
+                    value: true,
+                },
+            },
+        },
+    },
+)

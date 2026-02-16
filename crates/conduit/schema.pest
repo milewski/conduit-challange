@@ -1,0 +1,81 @@
+nodes = { SOI ~ NEWLINE* ~ ((input_def | pipeline_result | for_loop | sequence_group | anonymous_node | node) ~ NEWLINE*)* ~ EOI }
+input_def = { "->" ~ input_identifiers ~ ("<-" ~ value)? }
+input_identifiers = { identifier ~ ("," ~ identifier)* }
+pipeline_result = { "<-" ~ value ~ ("," ~ value)* }
+
+for_loop = { "for" ~ identifier ~ "in" ~ iterable ~ loop_body }
+iterable = { range | relation | identifier | array }
+loop_body = { "{" ~ NEWLINE* ~ (node | anonymous_node | for_loop | sequence_group | NEWLINE)* ~ "}" }
+sequence_group = { "(" ~ NEWLINE* ~ ((node | anonymous_node) ~ NEWLINE*)+ ~ ")" }
+range = { range_bound ~ range_operator ~ range_bound }
+range_operator = { "..=" | ".." }
+range_bound = { number | interpolation | relation | identifier }
+
+node = { identifier ~ module ~ (shorthand | body) }
+anonymous_node = { module ~ (shorthand | body) }
+
+shorthand = { direction ~ value }
+
+body = { "{" ~ NEWLINE* ~ (body_item ~ NEWLINE*)* ~ "}" }
+body_item = { event_handler | parameter }
+
+parameter = { parameter_target? ~ direction ~ value }
+parameter_target = { property | property_list }
+property_list = { "[" ~ property ~ ("," ~ property)+ ~ "]" }
+
+event_handler = { "on" ~ event_names ~ (event_handler_pipe | event_handler_block) }
+event_names = { identifier | "[" ~ identifier ~ ("," ~ identifier)* ~ "]" }
+event_payload_alias = { identifier }
+event_handler_pipe = { "->" ~ event_callback }
+event_handler_block = { event_payload_alias? ~ callback_block }
+event_callback = { callback_block | value }
+
+callback_block = { "{" ~ NEWLINE* ~ (callback_statement ~ NEWLINE*)* ~ "}" }
+callback_statement = { callback_assignment | node | anonymous_node }
+callback_assignment = { relation ~ callback_assignment_operator ~ value }
+callback_assignment_operator = { "<-" | "<<-" }
+
+string = ${ "\"" ~ (interpolation | string_content)* ~ "\"" }
+string_content = @{ char+ }
+interpolation = { "{" ~ interpolation_content ~ "}" }
+interpolation_content = @{ (!"}" ~ ANY)* }
+
+interpolation_expression = { SOI ~ expression ~ EOI }
+
+char = _{
+    !("\"" | "\\" | "{") ~ ANY
+    | "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | "{")
+    | "\\" ~ ("u" ~ ASCII_HEX_DIGIT{4})
+}
+
+number = @{
+    "-"?
+    ~ ("0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
+    ~ ("." ~ ASCII_DIGIT* ~ !".")?
+    ~ (^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
+}
+
+boolean = { "true" | "false" }
+relation = { identifier ~ "::" ~ property }
+tuple = { "(" ~ NEWLINE* ~ value ~ ("," ~ NEWLINE* ~ value)+ ~ ","? ~ NEWLINE* ~ ")" }
+array = { "[" ~ NEWLINE* ~ (value ~ NEWLINE*)* ~ "]" }
+
+value = { string | boolean | tuple | range | "(" ~ expression ~ ")" | number | node | anonymous_node | relation | identifier | array }
+
+expression = { numeric ~ (operation ~ numeric)* }
+numeric = _{ number | string | relation | identifier | "(" ~ expression ~ ")" }
+
+operation = _{ add | subtract | multiply | divide | power }
+    add      = { "+" }
+    subtract = { "-" }
+    multiply = { "*" }
+    divide   = { "/" }
+    power    = { "^" }
+
+direction = { "<<-" | "<-" | "->" }
+identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHA | ASCII_DIGIT | "_")* }
+module = ${ identifier ~ ("::" ~ property)? }
+property = @{ (ASCII_ALPHA | ASCII_DIGIT | "_")+ }
+
+WHITESPACE = _{ " " | "\t" }
+COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }

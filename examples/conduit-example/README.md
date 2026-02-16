@@ -1,10 +1,10 @@
 # Conduit Example
 
-This example demonstrates a simple image processing workflow using Conduit's node-based DSL. The workflow reads an image file, resizes it, and saves the result to a new location.
+This example demonstrates an interactive image processing workflow using Conduit's node-based DSL. The workflow asks for width/height, reads an image file, resizes it, and saves the result to a new location.
 
 ## Nodes Used
 
-The example utilizes three custom nodes:
+The example utilizes four custom nodes:
 
 1. **read_file**: Reads any file from the filesystem given a path
    - Input: `input` - File path as a string
@@ -15,7 +15,11 @@ The example utilizes three custom nodes:
    - Input: Receives a buffer from another node's output
    - Output: None (side effect: file creation)
 
-3. **resizer**: Processes an image buffer and resizes it to specified dimensions
+3. **prompt**: Prints a question, waits for terminal input, and emits an `answer` event carrying the numeric value
+   - Input: `question` - Question shown to the user
+   - Event: `answer` - Emitted with the parsed `u32` input
+
+4. **resizer**: Processes an image buffer and resizes it to specified dimensions
    - Input: `source` - Image data buffer
    - Input: `width` - Target width in pixels
    - Input: `height` - Target height in pixels
@@ -29,7 +33,7 @@ Execute the example with:
 cargo run --example basic
 ```
 
-Upon successful execution, you'll find a resized image file named `cover.smaller.png` in the `examples/conduit-example` directory.
+Upon successful execution, you'll find a resized image file named `cover.example.png` in the `examples/conduit-example` directory.
 
 ## Code Explanation
 

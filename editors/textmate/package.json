@@ -1,0 +1,34 @@
+{
+  "name": "conduit-textmate",
+  "displayName": "Conduit DSL TextMate",
+  "description": "TextMate grammar for Conduit DSL",
+  "version": "0.0.1",
+  "publisher": "conduit",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "conduit",
+        "aliases": [
+          "Conduit",
+          "conduit"
+        ],
+        "extensions": [
+          ".conduit"
+        ]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "conduit",
+        "scopeName": "source.conduit",
+        "path": "./syntaxes/conduit.tmLanguage.json"
+      }
+    ]
+  }
+}

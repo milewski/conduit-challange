@@ -1,0 +1,16 @@
+---
+source: packages/conduit/src/test/parser.rs
+expression: nodes
+---
+Err(
+    DuplicatedNode {
+        identifier: "name",
+        context: SourceContext {
+            source: Some(
+                "\n            name module_a {}\n            name module_b {}\n        ",
+            ),
+            line: None,
+            column: None,
+        },
+    },
+)

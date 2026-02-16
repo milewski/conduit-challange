@@ -1,0 +1,20 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser :: parse(\"name module { property <- (((10))) }\")"
+---
+Ok(
+    {
+        "name": NodeInstruct {
+            identifier: "name",
+            module: "module",
+            inputs: {
+                "property": Expression {
+                    direction: Input,
+                    value: Number(
+                        "10",
+                    ),
+                },
+            },
+        },
+    },
+)

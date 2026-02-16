@@ -1,0 +1,18 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser :: parse(r#\"name module_a <- 42\"#)"
+---
+Ok(
+    {
+        "name": NodeInstruct {
+            identifier: "name",
+            module: "module_a",
+            inputs: {
+                "input": Numeric {
+                    direction: Input,
+                    value: "42",
+                },
+            },
+        },
+    },
+)

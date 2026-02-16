@@ -1,0 +1,15 @@
+[package]
+name = "conduit-cli"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "conduit"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.32", features = ["derive"] }
+handlebars = "6.3.2"
+serde = { version = "1.0.219", features = ["derive"] }
+thiserror = { workspace = true }
+toml = "0.8.20"

@@ -1,0 +1,30 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser :: parse(\"name_a module_a { property_a <- anonymous_module_b {} }\")"
+---
+Ok(
+    {
+        "[UUID]": NodeInstruct {
+            identifier: "[UUID]",
+            module: "anonymous_module_b",
+            inputs: {
+                "output": Relation {
+                    identifier: "name_a",
+                    direction: Output,
+                    property: "property_a",
+                },
+            },
+        },
+        "name_a": NodeInstruct {
+            identifier: "name_a",
+            module: "module_a",
+            inputs: {
+                "property_a": Relation {
+                    identifier: "[UUID]",
+                    direction: Input,
+                    property: "output",
+                },
+            },
+        },
+    },
+)

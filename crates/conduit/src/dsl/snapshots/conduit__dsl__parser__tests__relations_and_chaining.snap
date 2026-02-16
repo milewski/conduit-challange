@@ -1,0 +1,130 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser ::\nparse(r#\"\n                name_a module_a { property_a <- 123 }\n                name_b module_b { property_b <- name_a::property_a }\n                name_c module_c { property_c <- name_b::property_b }\n                name_d module_d { property_d -> name_a }\n                name_e module_e { property_e -> name_a::custom_e }\n                name_f module_f {\n                    property_f_1 -> name_g module_g { property_g -> name_a::custom_g }\n                    property_f_2 -> name_h module_h { property_h -> name_a::custom_h }\n                }\n            \"#)"
+---
+Ok(
+    {
+        "name_a": NodeInstruct {
+            identifier: "name_a",
+            module: "module_a",
+            inputs: {
+                "custom_e": Relation {
+                    identifier: "name_e",
+                    direction: Input,
+                    property: "property_e",
+                },
+                "custom_g": Relation {
+                    identifier: "name_g",
+                    direction: Input,
+                    property: "property_g",
+                },
+                "custom_h": Relation {
+                    identifier: "name_h",
+                    direction: Input,
+                    property: "property_h",
+                },
+                "input": Relation {
+                    identifier: "name_d",
+                    direction: Input,
+                    property: "property_d",
+                },
+                "property_a": Numeric {
+                    direction: Input,
+                    value: "123",
+                },
+            },
+        },
+        "name_b": NodeInstruct {
+            identifier: "name_b",
+            module: "module_b",
+            inputs: {
+                "property_b": Relation {
+                    identifier: "name_a",
+                    direction: Input,
+                    property: "property_a",
+                },
+            },
+        },
+        "name_c": NodeInstruct {
+            identifier: "name_c",
+            module: "module_c",
+            inputs: {
+                "property_c": Relation {
+                    identifier: "name_b",
+                    direction: Input,
+                    property: "property_b",
+                },
+            },
+        },
+        "name_d": NodeInstruct {
+            identifier: "name_d",
+            module: "module_d",
+            inputs: {
+                "property_d": Relation {
+                    identifier: "name_a",
+                    direction: Output,
+                    property: "input",
+                },
+            },
+        },
+        "name_e": NodeInstruct {
+            identifier: "name_e",
+            module: "module_e",
+            inputs: {
+                "property_e": Relation {
+                    identifier: "name_a",
+                    direction: Output,
+                    property: "custom_e",
+                },
+            },
+        },
+        "name_f": NodeInstruct {
+            identifier: "name_f",
+            module: "module_f",
+            inputs: {
+                "property_f_1": Relation {
+                    identifier: "name_g",
+                    direction: Output,
+                    property: "input",
+                },
+                "property_f_2": Relation {
+                    identifier: "name_h",
+                    direction: Output,
+                    property: "input",
+                },
+            },
+        },
+        "name_g": NodeInstruct {
+            identifier: "name_g",
+            module: "module_g",
+            inputs: {
+                "input": Relation {
+                    identifier: "name_f",
+                    direction: Input,
+                    property: "property_f_1",
+                },
+                "property_g": Relation {
+                    identifier: "name_a",
+                    direction: Output,
+                    property: "custom_g",
+                },
+            },
+        },
+        "name_h": NodeInstruct {
+            identifier: "name_h",
+            module: "module_h",
+            inputs: {
+                "input": Relation {
+                    identifier: "name_f",
+                    direction: Input,
+                    property: "property_f_2",
+                },
+                "property_h": Relation {
+                    identifier: "name_a",
+                    direction: Output,
+                    property: "custom_h",
+                },
+            },
+        },
+    },
+)

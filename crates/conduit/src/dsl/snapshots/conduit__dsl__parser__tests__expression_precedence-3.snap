@@ -1,0 +1,32 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: "NodeParser :: parse(\"name module { property <- (10 - 2 * 3) }\")"
+---
+Ok(
+    {
+        "name": NodeInstruct {
+            identifier: "name",
+            module: "module",
+            inputs: {
+                "property": Expression {
+                    direction: Input,
+                    value: BinaryOperation {
+                        operation: Subtract,
+                        left: Number(
+                            "10",
+                        ),
+                        right: BinaryOperation {
+                            operation: Multiply,
+                            left: Number(
+                                "2",
+                            ),
+                            right: Number(
+                                "3",
+                            ),
+                        },
+                    },
+                },
+            },
+        },
+    },
+)

@@ -1,0 +1,22 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: nodes
+---
+Ok(
+    {
+        "[UUID]": NodeInstruct {
+            identifier: "[UUID]",
+            module: "anonymous_module",
+            inputs: {
+                "a": String {
+                    direction: Input,
+                    parts: [
+                        Literal(
+                            "string with space",
+                        ),
+                    ],
+                },
+            },
+        },
+    },
+)

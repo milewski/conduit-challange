@@ -1,0 +1,31 @@
+---
+source: packages/conduit/src/dsl/parser.rs
+expression: nodes
+---
+Ok(
+    {
+        "node": NodeInstruct {
+            identifier: "node",
+            module: "m",
+            inputs: {
+                "s": String {
+                    direction: Input,
+                    parts: [
+                        Literal(
+                            "Hello ",
+                        ),
+                        Interpolation(
+                            Reference {
+                                identifier: "config",
+                                property: "name",
+                            },
+                        ),
+                        Literal(
+                            "!",
+                        ),
+                    ],
+                },
+            },
+        },
+    },
+)

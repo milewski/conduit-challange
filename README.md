@@ -13,6 +13,7 @@ Conduit is a domain-specific language (DSL) for creating node-based workflows in
 - [Anonymous Nodes](#anonymous-nodes)
 - [Node Sharing and Chaining](#node-sharing-and-chaining)
 - [Examples](#examples)
+- [Editor Support](#editor-support)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -58,6 +59,23 @@ fn main() {
     // you should see hello world printed to the console
 }
 ```
+
+## Compile a `.conduit` workflow into an executable
+
+This repository now includes a CLI compiler binary (`conduit`) that turns a workflow file into a standalone executable.
+
+```bash
+cargo run -p conduit-cli -- ./workflow.conduit --output ./workflow-runner
+./workflow-runner --width 512 --height 256 --source ./example.png --destination ./resized.png
+```
+
+Node provisioning is compile-time and explicit:
+- `--nodes-package-name`: Cargo package name that contains your nodes
+- `--nodes-crate-name`: Rust crate import name for that package
+- `--nodes-crate-path`: local path to that package
+- `--nodes-use`: module path imported to force node registration (for example `my_nodes::nodes::*`)
+
+This matches Conduit's `inventory`-based registration and keeps generated executables self-contained.
 
 ## Basic Syntax
 
@@ -196,6 +214,10 @@ The true power of Conduit emerges when you create reusable nodes and chain them 
 ## Examples
 
 Check out the [examples directory](./examples) for complete workflow examples.
+
+## Editor Support
+
+TextMate syntax highlighting for `.conduit` files is available in [`./editors`](./editors).
 
 ## Contributing
 
