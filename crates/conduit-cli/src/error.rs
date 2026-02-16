@@ -11,8 +11,29 @@ pub enum CliError {
     #[error("Nodes crate path does not exist: {path}")]
     NodesCratePathMissing { path: PathBuf },
 
+    #[error("Invalid source code path: {path}")]
+    SourceCodePathInvalid { path: PathBuf },
+
+    #[error("Hyperskill markdown file not found: {path}")]
+    HyperskillMarkdownMissing { path: PathBuf },
+
+    #[error("No ```hyperskill blocks found in '{path}'")]
+    HyperskillBlocksMissing { path: PathBuf },
+
     #[error("Nodes crate path must contain Cargo.toml: {path}")]
     NodesCrateManifestMissing { path: PathBuf },
+
+    #[error("Failed to read nodes manifest '{path}': {source}")]
+    NodesManifestReadFailed { path: PathBuf, source: std::io::Error },
+
+    #[error("Failed to parse nodes manifest '{path}': {message}")]
+    NodesManifestParseFailed { path: PathBuf, message: String },
+
+    #[error("Nodes manifest does not define package.name: {path}")]
+    NodesPackageNameMissing { path: PathBuf },
+
+    #[error("Invalid nodes option value: {option_name} cannot be empty")]
+    NodesOptionEmpty { option_name: &'static str },
 
     #[error("Failed to read workflow '{path}': {source}")]
     WorkflowReadFailed { path: PathBuf, source: std::io::Error },
